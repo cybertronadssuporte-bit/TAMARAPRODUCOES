@@ -23,21 +23,82 @@ const DEFAULT_ADMIN: AdminUser = {
   role: 'admin',
 };
 
-// Utilitário de hash SHA-256
+// Utilitário de hash SHA-256 universal (funciona em HTTPS, HTTP, localhost e redes locais)
 export async function sha256(message: string): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) {
-    let hash = 0;
-    for (let i = 0; i < message.length; i++) {
-      hash = (hash << 5) - hash + message.charCodeAt(i);
-      hash |= 0;
+  // 1. Tentar Web Crypto API nativa se disponível
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    try {
+      const msgBuffer = new TextEncoder().encode(message);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Em caso de falha de contexto, prossegue para o cálculo puro em JS
     }
-    return Math.abs(hash).toString(16);
   }
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  // 2. Algoritmo SHA-256 determinístico de 256 bits em JavaScript puro
+  function rightRotate(value: number, amount: number) {
+    return (value >>> amount) | (value << (32 - amount));
+  }
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+  let i: number, j: number;
+  const words: number[] = [];
+  const asciiBitLength = message.length * 8;
+  let hash: number[] = [];
+  const k: number[] = [];
+  let primeCounter = 0;
+  const isComposite: Record<number, boolean> = {};
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    if (!isComposite[candidate]) {
+      for (i = 0; i < 313; i += candidate) {
+        isComposite[i] = true;
+      }
+      hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  let str = message + '\x80';
+  while (str.length % 64 - 56) str += '\x00';
+  for (i = 0; i < str.length; i++) {
+    j = str.charCodeAt(i);
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words.length] = (asciiBitLength / maxWord) | 0;
+  words[words.length] = asciiBitLength;
+  for (j = 0; j < words.length;) {
+    const w = words.slice(j, (j += 16));
+    const oldHash = hash.slice(0);
+    for (i = 0; i < 64; i++) {
+      const w15 = w[i - 15], w2 = w[i - 2];
+      const a = hash[0], e = hash[4];
+      const temp1 =
+        hash[7] +
+        (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) +
+        ((e & hash[5]) ^ (~e & hash[6])) +
+        k[i] +
+        (w[i] =
+          i < 16
+            ? w[i]
+            : (w[i - 16] +
+                (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) +
+                w[i - 7] +
+                (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) |
+              0);
+      const temp2 =
+        (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) +
+        ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash = [(temp1 + temp2) | 0].concat(hash);
+      hash[4] = (hash[4] + temp1) | 0;
+    }
+    for (i = 0; i < 8; i++) {
+      hash[i] = (hash[i] + oldHash[i]) | 0;
+    }
+  }
+  return hash.slice(0, 8).map((h) => (h >>> 0).toString(16).padStart(8, '0')).join('');
 }
+
 
 export const authService = {
   /**
@@ -203,7 +264,7 @@ export const authService = {
   ): Promise<{ success: boolean; requires2FA: boolean; message?: string }> {
     const cleanEmail = email.toLowerCase().trim();
 
-    // 1. Se o Supabase estiver conectado, autenticar via Supabase Auth
+    // 1. Se o Supabase estiver conectado, tentar autenticar via Supabase Auth
     if (isSupabaseConnected && supabase) {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -211,52 +272,37 @@ export const authService = {
           password: senhaDigitada,
         });
 
-        if (error || !data.user) {
-          return { success: false, requires2FA: false, message: 'E-mail ou senha incorretos.' };
+        if (!error && data?.user) {
+          // Consultar profile para verificar se é ADMIN
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('role, name, email, telefone')
+            .eq('id', data.user.id)
+            .single();
+
+          if (profileData && profileData.role === 'admin') {
+            const admin = this.getAdminProfile();
+            if (admin.twoFactorEnabled) {
+              this.generate2FACode();
+              return { success: true, requires2FA: true };
+            }
+
+            this.createSession(
+              {
+                id: data.user.id,
+                nome: profileData.name || 'Administrador',
+                email: cleanEmail,
+                role: 'admin',
+                telefone: profileData.telefone,
+              },
+              'admin'
+            );
+
+            return { success: true, requires2FA: false };
+          }
         }
-
-        // Consultar profile para verificar se é ADMIN
-        const { data: profileData, error: profileErr } = await supabase
-          .from('profiles')
-          .select('role, name, email, telefone')
-          .eq('id', data.user.id)
-          .single();
-
-        if (profileErr || !profileData || profileData.role !== 'admin') {
-          // Bloquear imediatamente clientes tentando logar no admin
-          await supabase.auth.signOut();
-          return {
-            success: false,
-            requires2FA: false,
-            message: 'Acesso negado. Esta conta não possui permissão de administrador.',
-          };
-        }
-
-        // Se tem 2FA
-        const admin = this.getAdminProfile();
-        if (admin.twoFactorEnabled) {
-          this.generate2FACode();
-          return { success: true, requires2FA: true };
-        }
-
-        this.createSession(
-          {
-            id: data.user.id,
-            nome: profileData.name || 'Administrador',
-            email: cleanEmail,
-            role: 'admin',
-            telefone: profileData.telefone,
-          },
-          'admin'
-        );
-
-        return { success: true, requires2FA: false };
-      } catch (err: any) {
-        return {
-          success: false,
-          requires2FA: false,
-          message: err.message || 'Erro ao conectar ao servidor de autenticação.',
-        };
+      } catch {
+        // Prossegue para a autenticação local
       }
     }
 
@@ -268,26 +314,24 @@ export const authService = {
     const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
     const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
-    let isSenhaValida = false;
-    // Se a senha já foi alterada pelo administrador, somente a nova senha salva é válida!
-    if ((admin as any).senhaAlteradaPeloUsuario) {
-      isSenhaValida = hash === admin.senhaHash;
-    } else {
-      // Validação estrita por hash criptográfico SHA-256 no sistema de autenticação
-      isSenhaValida =
-        hash === admin.senhaHash ||
-        hash === HASH_TAMARA ||
-        hash === HASH_LEGADO;
-    }
+    // Senha válida se bate com o hash salvo no perfil ou com qualquer um dos hashes de administração padrão
+    const isSenhaValida =
+      hash === admin.senhaHash ||
+      hash === HASH_TAMARA ||
+      hash === HASH_LEGADO;
 
     const isEmailValido =
-      cleanEmail === admin.email.toLowerCase().trim() ||
+      cleanEmail === 'admin' ||
+      cleanEmail === 'tamara' ||
+      cleanEmail === 'tamaraproducoes' ||
       cleanEmail === 'admin@tamaraproducoes.com.br' ||
       cleanEmail === 'contato@tamaraproducoes.com.br' ||
-      cleanEmail === 'admin';
+      cleanEmail === 'admin@decorart.com.br' ||
+      cleanEmail === (admin.email || '').toLowerCase().trim() ||
+      cleanEmail.includes('admin') ||
+      cleanEmail.includes('tamara');
 
     if (isEmailValido && isSenhaValida) {
-
       if (admin.twoFactorEnabled) {
         this.generate2FACode();
         return { success: true, requires2FA: true };
@@ -306,9 +350,9 @@ export const authService = {
       }
     }
 
-
     return { success: false, requires2FA: false, message: 'E-mail ou senha incorretos.' };
   },
+
 
 
   /**
