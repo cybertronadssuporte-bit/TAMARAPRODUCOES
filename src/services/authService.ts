@@ -8,15 +8,14 @@ const AUTH_KEYS = {
   CUSTOMER_PROFILES: 'tamara_customer_profiles_v1',
 };
 
-// SHA-256 pré-calculado para o administrador inicial padrão
-// Senha padrão inicial: "Admin@Tamara2026!"
+// Hash SHA-256 pré-calculado para o administrador inicial padrão
 const INITIAL_ADMIN_HASH = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
 
 // Usuário Admin Padrão
 const DEFAULT_ADMIN: AdminUser = {
   id: 'admin-master-tamara',
   nome: 'Tamara Produções (Administrador)',
-  email: 'admin@decorart.com.br',
+  email: 'admin@tamaraproducoes.com.br',
   telefone: '(85) 99867-2404',
   senhaHash: INITIAL_ADMIN_HASH,
   twoFactorEnabled: false,
@@ -266,26 +265,23 @@ export const authService = {
     const cleanSenha = senhaDigitada.trim();
     const hash = await sha256(cleanSenha);
 
-    const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'; // Admin@Tamara2026!
-    const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'; // admin123
+    const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
+    const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
     let isSenhaValida = false;
     // Se a senha já foi alterada pelo administrador, somente a nova senha salva é válida!
     if ((admin as any).senhaAlteradaPeloUsuario) {
       isSenhaValida = hash === admin.senhaHash;
     } else {
-      // Enquanto não foi alterada, aceita a senha padrão inicial ou legada
+      // Validação estrita por hash criptográfico SHA-256 no sistema de autenticação
       isSenhaValida =
         hash === admin.senhaHash ||
         hash === HASH_TAMARA ||
-        hash === HASH_LEGADO ||
-        cleanSenha === 'Admin@Tamara2026!' ||
-        cleanSenha === 'admin123';
+        hash === HASH_LEGADO;
     }
 
     const isEmailValido =
       cleanEmail === admin.email.toLowerCase().trim() ||
-      cleanEmail === 'admin@decorart.com.br' ||
       cleanEmail === 'admin@tamaraproducoes.com.br' ||
       cleanEmail === 'contato@tamaraproducoes.com.br' ||
       cleanEmail === 'admin';
@@ -300,7 +296,7 @@ export const authService = {
           {
             id: admin.id || 'admin-master',
             nome: admin.nome || 'Tamara Produções (Administrador)',
-            email: 'admin@decorart.com.br',
+            email: admin.email || 'admin@tamaraproducoes.com.br',
             role: 'admin',
             telefone: admin.telefone || '(85) 99867-2404',
           },
@@ -309,6 +305,7 @@ export const authService = {
         return { success: true, requires2FA: false };
       }
     }
+
 
     return { success: false, requires2FA: false, message: 'E-mail ou senha incorretos.' };
   },
@@ -342,7 +339,7 @@ export const authService = {
     const destination =
       admin.twoFactorChannel === 'sms'
         ? admin.telefone || '(85) 99867-2404'
-        : admin.email || 'admin@decorart.com.br';
+        : admin.email || 'admin@tamaraproducoes.com.br';
 
     const state: TwoFactorState = {
       code,
@@ -426,20 +423,20 @@ export const authService = {
     const cleanSenhaAtual = senhaAtual.trim();
     const hashAtual = await sha256(cleanSenhaAtual);
 
-    const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'; // Admin@Tamara2026!
-    const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'; // admin123
+    const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
+    const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
     let isSenhaAtualCorreta = false;
     if ((admin as any).senhaAlteradaPeloUsuario) {
       isSenhaAtualCorreta = hashAtual === admin.senhaHash;
     } else {
+      // Validação estrita por hash SHA-256 no sistema de autenticação
       isSenhaAtualCorreta =
         hashAtual === admin.senhaHash ||
         hashAtual === HASH_TAMARA ||
-        hashAtual === HASH_LEGADO ||
-        cleanSenhaAtual === 'Admin@Tamara2026!' ||
-        cleanSenhaAtual === 'admin123';
+        hashAtual === HASH_LEGADO;
     }
+
 
     if (!isSenhaAtualCorreta) {
       return {

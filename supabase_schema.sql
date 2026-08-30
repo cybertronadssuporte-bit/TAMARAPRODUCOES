@@ -502,10 +502,10 @@ WITH CHECK (bucket_id = 'decoracoes' AND public.is_admin());
 -- Para criar o primeiro administrador sem expor senhas no frontend:
 --
 -- 1. Acesse Authentication -> Users -> "Invite User" ou "Add User".
--- 2. Crie com o e-mail: admin@decorart.com.br (ou o e-mail oficial da empresa).
--- 3. Defina a senha com segurança.
+-- 2. Crie com o e-mail: admin@tamaraproducoes.com.br (ou o e-mail oficial da sua empresa).
+-- 3. Defina uma senha forte com segurança.
 -- 4. No SQL Editor, promova o usuário criado para 'admin':
 --    UPDATE public.profiles
 --    SET role = 'admin'
---    WHERE email = 'admin@decorart.com.br';
+--    WHERE email = 'admin@tamaraproducoes.com.br';
 -- ============================================================================

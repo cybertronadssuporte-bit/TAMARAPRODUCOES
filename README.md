@@ -29,9 +29,8 @@ Sistema web moderno, profissional e responsivo para empresa de **Decoração de 
 
 ### 2. Painel Administrativo (`/admin`)
 - **Login Seguro**:
-  - Acesso com credenciais de demonstração:
-    - **E-mail**: `admin@decorart.com.br`
-    - **Senha**: `admin123`
+  - Acesso protegido por autenticação segura e controle de acesso baseado em funções (role: admin).
+
 - **Dashboard em Tempo Real**:
   - Total de agendamentos, agendamentos de hoje, faturamento estimado e contadores de status.
 - **Gerenciamento de Agendamentos**:

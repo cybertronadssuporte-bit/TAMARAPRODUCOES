@@ -25,8 +25,8 @@ const STORAGE_KEYS = {
   TWO_FACTOR_STATE: 'tamara_2fa_state_v2',
 };
 
-// SHA-256 pre-calculado de "admin123"
-const DEFAULT_SENHA_HASH = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+// Hash criptográfico SHA-256 inicial do administrador
+const DEFAULT_SENHA_HASH = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
 
 // Função utilitária para hash seguro SHA-256 no navegador
 export async function sha256(message: string): Promise<string> {
@@ -347,7 +347,7 @@ const INITIAL_AGENDAMENTOS: Agendamento[] = [
 const INITIAL_ADMIN_USER: AdminUser = {
   id: 'admin-tamara-01',
   nome: 'Tamara Produções',
-  email: 'admin@decorart.com.br',
+  email: 'contato@tamaraproducoes.com.br',
   telefone: '(85) 99867-2404',
   senhaHash: DEFAULT_SENHA_HASH,
   twoFactorEnabled: false,
