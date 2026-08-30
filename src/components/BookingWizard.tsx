@@ -186,12 +186,24 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
     }
   };
 
-  // Submissão do agendamento
+  // Submissão do agendamento — Persistência OBRIGATÓRIA no banco ANTES do WhatsApp
   const handleConfirmarAgendamento = () => {
+    // Prevenção de cliques concorrentes / duplicados (Item 14)
+    if (submitting) return;
+
     try {
       setSubmitting(true);
       setErrorMsg(null);
 
+      // Verificação atômica de disponibilidade de horário no backend (Item 15)
+      const disponivel = storageService.isHorarioDisponivel(dataInstalacao, horarioSelecionado);
+      if (!disponivel) {
+        setErrorMsg('⚠️ Este horário acabou de ser reservado. Escolha outro horário.');
+        setSubmitting(false);
+        return;
+      }
+
+      // 1. SALVAR NO BANCO DE DADOS (Registro Oficial do Pedido - Item 10 e 12)
       const novo = storageService.createAgendamento({
         temaId: decoracao.temaId,
         temaNome: decoracao.temaNome || tipoEvento,
@@ -222,6 +234,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
         valorTotal: decoracao.preco,
       });
 
+      // 2. BANCO CONFIRMA: Gerar número do pedido e exibir Página de Confirmação (Item 13)
       setAgendamentoConfirmado(novo);
       setCurrentStep(5);
       onBookingCompleted(novo);
@@ -234,10 +247,10 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
           colors: ['#D4AF37', '#C59B27', '#101622', '#22c55e', '#ffffff'],
         });
       } catch {
-        // Fallback
+        // Fallback confetti
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao processar agendamento. Tente novamente.');
+      setErrorMsg(err.message || '⚠️ Este horário acabou de ser reservado. Escolha outro horário.');
     } finally {
       setSubmitting(false);
     }
@@ -805,7 +818,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
             </div>
           )}
 
-          {/* ETAPA 5 — SUCESSO & WHATSAPP */}
+          {/* ETAPA 5 — PÁGINA DE CONFIRMAÇÃO OFICIAL & WHATSAPP (Item 13) */}
           {currentStep === 5 && agendamentoConfirmado && (
             <div className="py-2 sm:py-4 text-center space-y-4 sm:space-y-6 animate-fade-in">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
@@ -813,50 +826,56 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
               </div>
 
               <div>
-                <h3 className="text-xl xs:text-2xl sm:text-3xl font-serif font-bold text-noir-950 leading-tight">
-                  🎉 Agendamento realizado com sucesso!
+                <h3 className="text-xl xs:text-2xl sm:text-3xl font-serif font-bold text-noir-950 leading-tight uppercase tracking-tight">
+                  🎉 PEDIDO REALIZADO COM SUCESSO!
                 </h3>
-                <p className="text-xs sm:text-sm text-gray-600 mt-1.5 max-w-md mx-auto leading-relaxed">
-                  Seu pedido foi registrado e o horário de instalação está garantido.
+                <p className="text-xs sm:text-sm text-emerald-700 font-semibold mt-2 max-w-md mx-auto leading-relaxed">
+                  Seu pedido já foi registrado em nosso sistema.
                 </p>
               </div>
 
-              {/* Recibo Compacto */}
-              <div className="max-w-md mx-auto p-4 sm:p-5 rounded-2xl bg-gray-50 border border-gray-200 text-left space-y-2 text-xs shadow-xs">
-                <div className="flex justify-between border-b border-gray-200 pb-2">
-                  <span className="font-bold text-gray-500 uppercase">Número do Pedido:</span>
-                  <span className="font-mono font-bold text-gold-800 text-sm">
+              {/* Recibo Oficial do Pedido */}
+              <div className="max-w-md mx-auto p-5 sm:p-6 rounded-2xl bg-white border border-gray-200 text-left space-y-3 text-xs shadow-md">
+                <div className="flex justify-between items-center border-b border-gray-200 pb-3">
+                  <span className="font-bold text-gray-500 uppercase tracking-wider text-[11px]">Número do pedido:</span>
+                  <span className="font-mono font-bold text-gold-800 text-base">
                     {agendamentoConfirmado.numeroPedido}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-gray-500 font-medium">Tema:</span>
-                  <span className="font-semibold text-noir-900 uppercase">
+                  <span className="font-bold text-noir-900 uppercase">
                     {agendamentoConfirmado.temaNome}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-gray-500 font-medium">Decoração:</span>
-                  <span className="font-semibold text-noir-900">
+                  <span className="font-bold text-noir-900">
                     {agendamentoConfirmado.produtoNome}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 font-medium">Data da Instalação:</span>
-                  <span className="font-semibold text-noir-900">
-                    {formatarDataExtenso(agendamentoConfirmado.instalacao.data)}
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 font-medium">Data:</span>
+                  <span className="font-bold text-noir-900">
+                    {(() => {
+                      const [ano, mes, dia] = agendamentoConfirmado.instalacao.data.split('-');
+                      return `${dia}/${mes}/${ano}`;
+                    })()}
                   </span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-gray-500 font-medium">Horário:</span>
-                  <span className="font-semibold text-noir-900">
+                  <span className="font-bold text-noir-900">
                     {agendamentoConfirmado.instalacao.horario}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500 font-medium">Endereço:</span>
-                  <span className="font-semibold text-noir-900 text-right truncate max-w-[200px]">
-                    {agendamentoConfirmado.evento.endereco}, nº {agendamentoConfirmado.evento.numero}
+                <div className="flex justify-between items-center border-t border-gray-100 pt-2">
+                  <span className="text-gray-500 font-medium">Valor:</span>
+                  <span className="font-bold text-emerald-700 text-sm">
+                    {(agendamentoConfirmado.valorTotal || 0).toLocaleString('pt-BR', {
+                      style: 'currency',
+                      currency: 'BRL',
+                    })}
                   </span>
                 </div>
               </div>
@@ -867,10 +886,13 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                   href={whatsappService.getLinkConfirmacaoParaEmpresa(agendamentoConfirmado)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="w-full min-h-[48px] py-3.5 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2 transition-all transform active:scale-98"
+                  onClick={() => {
+                    whatsappService.abrirWhatsAppConfirmacao(agendamentoConfirmado);
+                  }}
+                  className="w-full min-h-[50px] py-3.5 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs sm:text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2.5 transition-all transform active:scale-98"
                 >
                   <Send className="w-4 h-4" />
-                  <span>FALAR NO WHATSAPP</span>
+                  <span>CONFIRMAR PELO WHATSAPP</span>
                 </a>
 
                 <button
@@ -890,7 +912,8 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
             {currentStep > 1 ? (
               <button
                 onClick={handleBack}
-                className="min-h-[44px] flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-noir-900 px-3 py-2 rounded-xl transition-colors"
+                disabled={submitting}
+                className="min-h-[44px] flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-noir-900 px-3 py-2 rounded-xl transition-colors disabled:opacity-50"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Voltar</span>
@@ -898,7 +921,8 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
             ) : (
               <button
                 onClick={onClose}
-                className="min-h-[44px] text-xs font-semibold text-gray-500 hover:text-noir-900 px-3 py-2"
+                disabled={submitting}
+                className="min-h-[44px] text-xs font-semibold text-gray-500 hover:text-noir-900 px-3 py-2 disabled:opacity-50"
               >
                 Cancelar
               </button>
@@ -919,11 +943,14 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                 className="min-h-[48px] flex items-center gap-2 px-6 sm:px-8 py-3 rounded-xl bg-gradient-to-r from-gold-500 to-gold-400 hover:from-gold-600 hover:to-gold-500 text-noir-950 font-bold text-xs uppercase tracking-wider shadow-luxury active:scale-98 transition-all disabled:opacity-50"
               >
                 {submitting ? (
-                  <span>Processando...</span>
+                  <>
+                    <Sparkles className="w-4 h-4 animate-spin" />
+                    <span>Registrando pedido...</span>
+                  </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4" />
-                    <span>CONFIRMAR AGENDAMENTO</span>
+                    <span>CONFIRMAR PEDIDO</span>
                   </>
                 )}
               </button>
@@ -933,4 +960,5 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
       </div>
     </div>
   );
+
 };

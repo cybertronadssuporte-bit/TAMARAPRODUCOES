@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
 import { EventCategories } from './components/EventCategories';
@@ -12,26 +12,33 @@ import { FloatingWhatsApp } from './components/FloatingWhatsApp';
 
 // Admin Components
 import { AdminLogin } from './components/admin/AdminLogin';
-import { AdminLayout } from './components/admin/AdminLayout';
+import { AdminLayout, AdminTab } from './components/admin/AdminLayout';
 
 import { Produto, Tema, EmpresaConfig } from './types';
 import { storageService } from './services/storageService';
+import { authService } from './services/authService';
+import { ShieldAlert, X } from 'lucide-react';
 
 export const App: React.FC = () => {
-  // Rota principal ('site' | 'admin')
-  const [currentView, setCurrentView] = useState<'site' | 'admin'>(() => {
-    return window.location.hash.includes('admin') || window.location.pathname.includes('admin')
-      ? 'admin'
-      : 'site';
-  });
-
-  // Autenticação do Admin
-  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(() => {
-    return storageService.isAdminAuthenticated();
-  });
-
   // Configuração da Empresa Dinâmica
   const [empresa, setEmpresa] = useState<EmpresaConfig>(() => storageService.getEmpresaConfig());
+
+  // Rota e aba administrativa ativa
+  const [isAdminView, setIsAdminView] = useState<boolean>(() => {
+    const path = window.location.pathname.toLowerCase();
+    const hash = window.location.hash.toLowerCase();
+    return path.includes('admin') || hash.includes('admin');
+  });
+
+  const [adminTab, setAdminTab] = useState<AdminTab>('dashboard');
+
+  // Alerta de Acesso Negado para clientes comuns tentando entrar no /admin
+  const [accessDeniedMsg, setAccessDeniedMsg] = useState<string | null>(null);
+
+  // Autenticação do Admin (Validada no AuthService com role = 'admin')
+  const [isAdminAuth, setIsAdminAuth] = useState<boolean>(() => {
+    return authService.isAdmin();
+  });
 
   // Tema Selecionado (Tema -> Produtos)
   const [selectedTema, setSelectedTema] = useState<Tema | null>(null);
@@ -40,8 +47,58 @@ export const App: React.FC = () => {
   const [detailModalItem, setDetailModalItem] = useState<Produto | null>(null);
   const [bookingModalItem, setBookingModalItem] = useState<Produto | null>(null);
 
+  // Mapeador de sub-rotas administrativas
+  const parseAdminRoute = useCallback((): { isAdmin: boolean; tab: AdminTab } => {
+    const raw = (window.location.pathname + window.location.hash).toLowerCase();
+    if (!raw.includes('admin')) {
+      return { isAdmin: false, tab: 'dashboard' };
+    }
+
+    let tab: AdminTab = 'dashboard';
+    if (raw.includes('agendamentos')) tab = 'agendamentos';
+    else if (raw.includes('temas') || raw.includes('produtos')) tab = 'temas';
+    else if (raw.includes('calendario') || raw.includes('agenda')) tab = 'calendario';
+    else if (raw.includes('clientes')) tab = 'clientes';
+    else if (raw.includes('configuracoes') || raw.includes('identidade')) tab = 'identidade';
+    else if (raw.includes('seguranca')) tab = 'seguranca';
+    else if (raw.includes('minha-conta') || raw.includes('conta')) tab = 'conta';
+    else tab = 'dashboard';
+
+    return { isAdmin: true, tab };
+  }, []);
+
+  // Sincronização de rotas e segurança
   useEffect(() => {
-    // Sincronizar título da página e SEO com o nome da empresa
+    const checkAccessAndSyncRoute = () => {
+      const { isAdmin, tab } = parseAdminRoute();
+
+      if (isAdmin) {
+        // SEGURANÇA: Se o usuário logado for um CLIENTE comum (role = 'customer')
+        if (authService.isCustomer()) {
+          // Bloqueia acesso imediatamente, não carrega dados administrativos e redireciona
+          setIsAdminView(false);
+          window.location.hash = '';
+          if (window.location.pathname.includes('admin')) {
+            window.history.replaceState(null, '', '/');
+          }
+          setAccessDeniedMsg(
+            '⛔ Acesso Negado: A área administrativa é privada e restrita a administradores autorizados. Sua conta de cliente não possui permissão de acesso.'
+          );
+          return;
+        }
+
+        // Se for admin autenticado ou visitante (para tela de login)
+        setIsAdminView(true);
+        setAdminTab(tab);
+        setIsAdminAuth(authService.isAdmin());
+      } else {
+        setIsAdminView(false);
+      }
+    };
+
+    checkAccessAndSyncRoute();
+
+    // Sincronizar título e dados da empresa
     const updateTitle = () => {
       const cfg = storageService.getEmpresaConfig();
       setEmpresa(cfg);
@@ -49,49 +106,58 @@ export const App: React.FC = () => {
     };
     updateTitle();
 
+    const handleAuthChange = () => {
+      setIsAdminAuth(authService.isAdmin());
+      checkAccessAndSyncRoute();
+    };
+
+    window.addEventListener('hashchange', checkAccessAndSyncRoute);
+    window.addEventListener('popstate', checkAccessAndSyncRoute);
+    window.addEventListener('auth_state_changed', handleAuthChange);
     window.addEventListener('empresa_updated', updateTitle);
 
-    // Sincronizar hash da URL
-    const handleHashChange = () => {
-      if (window.location.hash.includes('admin')) {
-        setCurrentView('admin');
-      } else {
-        setCurrentView('site');
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
     return () => {
-      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('hashchange', checkAccessAndSyncRoute);
+      window.removeEventListener('popstate', checkAccessAndSyncRoute);
+      window.removeEventListener('auth_state_changed', handleAuthChange);
       window.removeEventListener('empresa_updated', updateTitle);
     };
-  }, []);
+  }, [parseAdminRoute]);
 
   // Navegar para Admin
   const handleOpenAdmin = () => {
+    if (authService.isCustomer()) {
+      setAccessDeniedMsg(
+        '⛔ Acesso Negado: A área administrativa é privada e restrita a administradores autorizados.'
+      );
+      return;
+    }
     window.location.hash = 'admin';
-    setCurrentView('admin');
+    setIsAdminView(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Voltar para Site
   const handleBackToSite = () => {
     window.location.hash = '';
-    setCurrentView('site');
+    if (window.location.pathname.includes('admin')) {
+      window.history.replaceState(null, '', '/');
+    }
+    setIsAdminView(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Logout Admin
   const handleLogoutAdmin = () => {
-    storageService.logoutAdmin();
+    authService.logout();
     setIsAdminAuth(false);
+    handleBackToSite();
   };
 
   // Navegação suave por âncoras
   const handleNavigateToSection = (sectionId: string) => {
-    if (currentView !== 'site') {
-      setCurrentView('site');
-      window.location.hash = '';
+    if (isAdminView) {
+      handleBackToSite();
     }
 
     setTimeout(() => {
@@ -115,18 +181,24 @@ export const App: React.FC = () => {
   };
 
   // --- SE FOR A ÁREA ADMINISTRATIVA ---
-  if (currentView === 'admin') {
+  if (isAdminView) {
+    // 1. Se não estiver autenticado como ADMIN, exige login
     if (!isAdminAuth) {
       return (
         <AdminLogin
-          onLoginSuccess={() => setIsAdminAuth(true)}
+          onLoginSuccess={() => {
+            setIsAdminAuth(true);
+            setIsAdminView(true);
+          }}
           onBackToSite={handleBackToSite}
         />
       );
     }
 
+    // 2. Autenticado com role = 'admin' comprovada: carrega o painel administrativo
     return (
       <AdminLayout
+        initialTab={adminTab}
         onGoToSite={handleBackToSite}
         onLogout={handleLogoutAdmin}
       />
@@ -136,6 +208,23 @@ export const App: React.FC = () => {
   // --- SE FOR O SITE PÚBLICO DO CLIENTE ---
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF9F5] text-noir-900 selection:bg-gold-200">
+      {/* Alerta de Acesso Negado ao /admin para Clientes */}
+      {accessDeniedMsg && (
+        <div className="bg-rose-600 text-white px-4 py-3 shadow-lg sticky top-0 z-50 animate-fade-in flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-medium">
+            <ShieldAlert className="w-5 h-5 shrink-0 text-amber-300" />
+            <span>{accessDeniedMsg}</span>
+          </div>
+          <button
+            onClick={() => setAccessDeniedMsg(null)}
+            className="p-1 hover:bg-rose-700 rounded-lg transition-colors shrink-0"
+            aria-label="Fechar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Barra de Navegação com Logo e Nome Dinâmicos */}
       <Navbar
         onOpenCatalog={handleOpenCatalog}
@@ -175,7 +264,7 @@ export const App: React.FC = () => {
         onNavigateToSection={handleNavigateToSection}
       />
 
-      {/* 4. BOTÃO FLUTUANTE DO WHATSAPP (com número e mensagem oficial da Tamara Produções) */}
+      {/* BOTÃO FLUTUANTE DO WHATSAPP (com número oficial da Tamara Produções: +55 85 99867-2404) */}
       <FloatingWhatsApp
         numero={empresa.whatsapp || '5585998672404'}
         nomeEmpresa={empresa.nome}
@@ -200,7 +289,7 @@ export const App: React.FC = () => {
           isOpen={!!bookingModalItem}
           onClose={() => setBookingModalItem(null)}
           onBookingCompleted={() => {
-            // Recarrega contadores
+            // Callback opcional de agendamento concluído
           }}
         />
       )}

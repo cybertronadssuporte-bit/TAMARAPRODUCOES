@@ -1,13 +1,98 @@
 -- ============================================================================
--- SCHEMA SQL COMPLETO: PLATAFORMA DE DECORAÇÃO DE EVENTOS — TAMARA PRODUÇÕES
+-- SCHEMA SQL COMPLETO E SEGURO: PLATAFORMA TAMARA PRODUÇÕES
 -- PostgreSQL / Supabase
+-- Sistema de Funções (Roles), Row Level Security (RLS) e Políticas de Acesso
 -- ============================================================================
 
 -- Extensões necessárias
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ----------------------------------------------------------------------------
--- 1. TABELA: EMPRESA (Identidade da Empresa Dinâmica)
+-- 1. TABELA: PROFILES (Vínculo direto com auth.users e Sistema de Roles)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    role VARCHAR(20) NOT NULL DEFAULT 'customer' CHECK (role IN ('admin', 'customer')),
+    telefone VARCHAR(30),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles (role);
+CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles (email);
+
+-- Função auxiliar segura para verificar se o usuário autenticado atual é ADMIN
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$$;
+
+-- Função de Trigger para proteger a coluna 'role' contra auto-elevação por clientes
+CREATE OR REPLACE FUNCTION public.prevent_role_self_escalation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Se o usuário tentar alterar seu próprio role e não for admin prévio, rejeita a alteração do role
+  IF NEW.role IS DISTINCT FROM OLD.role THEN
+    IF NOT public.is_admin() THEN
+      RAISE EXCEPTION 'Acesso não autorizado: Você não tem permissão para alterar sua função de acesso.';
+    END IF;
+  END IF;
+  NEW.updated_at = timezone('utc'::text, now());
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_role_self_escalation ON public.profiles;
+CREATE TRIGGER trg_prevent_role_self_escalation
+BEFORE UPDATE ON public.profiles
+FOR EACH ROW
+EXECUTE FUNCTION public.prevent_role_self_escalation();
+
+-- Trigger para criar perfil automaticamente no momento do cadastro no Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, name, email, role, telefone)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'name', NEW.raw_user_meta_data->>'nome', 'Cliente'),
+    NEW.email,
+    -- Padrão é sempre 'customer'
+    COALESCE(NEW.raw_user_meta_data->>'role', 'customer'),
+    NEW.raw_user_meta_data->>'telefone'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET
+    email = EXCLUDED.email,
+    updated_at = timezone('utc'::text, now());
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+AFTER INSERT ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_new_user();
+
+-- ----------------------------------------------------------------------------
+-- 2. TABELA: EMPRESA (Identidade Visual e Contato da Tamara Produções)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.empresa (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -21,13 +106,13 @@ CREATE TABLE IF NOT EXISTS public.empresa (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Inserir empresa padrão
+-- Inserir empresa padrão se não existir
 INSERT INTO public.empresa (nome, whatsapp, whatsapp_formatado, email, cidade_padrao)
 VALUES ('TAMARA PRODUÇÕES', '5585998672404', '+55 85 99867-2404', 'contato@tamaraproducoes.com.br', 'Fortaleza - CE')
 ON CONFLICT DO NOTHING;
 
 -- ----------------------------------------------------------------------------
--- 2. TABELA: TEMAS (TEMA)
+-- 3. TABELA: TEMAS (Categorias de Eventos)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.temas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -41,7 +126,7 @@ CREATE TABLE IF NOT EXISTS public.temas (
 
 CREATE INDEX IF NOT EXISTS idx_temas_ativo_ordem ON public.temas (ativo, ordem);
 
--- Inserir temas iniciais
+-- Inserir temas iniciais se vazios
 INSERT INTO public.temas (nome, descricao, imagem_url, ordem, ativo) VALUES
 ('Aniversários', 'Celebrações memoráveis com temas contemporâneos, personagens heroicos e arranjos exclusivos.', 'https://images.unsplash.com/photo-1464349095431-e9a21285b5f3?auto=format&fit=crop&w=800&q=80', 1, true),
 ('Casamentos', 'Cenografia romântica e refinada com arcos florais nobres, iluminação intimista e toques dourados.', 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=800&q=80', 2, true),
@@ -52,7 +137,7 @@ INSERT INTO public.temas (nome, descricao, imagem_url, ordem, ativo) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ----------------------------------------------------------------------------
--- 3. TABELA: PRODUTOS (PRODUTO DENTRO DO TEMA)
+-- 4. TABELA: PRODUTOS (Decorações dentro dos Temas)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.produtos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -70,7 +155,7 @@ CREATE TABLE IF NOT EXISTS public.produtos (
 CREATE INDEX IF NOT EXISTS idx_produtos_tema ON public.produtos (tema_id, ativo);
 
 -- ----------------------------------------------------------------------------
--- 4. TABELA: PRODUTO_IMAGENS (Várias Fotos por Produto)
+-- 5. TABELA: PRODUTO_IMAGENS (Fotos por Produto)
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.produto_imagens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -83,7 +168,7 @@ CREATE TABLE IF NOT EXISTS public.produto_imagens (
 CREATE INDEX IF NOT EXISTS idx_produto_imagens_produto ON public.produto_imagens (produto_id, ordem);
 
 -- ----------------------------------------------------------------------------
--- 5. TABELA: CLIENTES
+-- 6. TABELA: CLIENTES
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.clientes (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -96,15 +181,20 @@ CREATE TABLE IF NOT EXISTS public.clientes (
 CREATE INDEX IF NOT EXISTS idx_clientes_whatsapp ON public.clientes (whatsapp);
 
 -- ----------------------------------------------------------------------------
--- 6. TABELA: AGENDAMENTOS (Reserva com Tema, Produto, Data e Endereço)
+-- 7. TABELA: AGENDAMENTOS (Registro Oficial de Pedidos)
 -- ----------------------------------------------------------------------------
-CREATE TYPE status_agendamento_enum AS ENUM (
-    'pendente',
-    'confirmado',
-    'em_preparacao',
-    'instalacao_realizada',
-    'cancelado'
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'status_agendamento_enum') THEN
+    CREATE TYPE status_agendamento_enum AS ENUM (
+      'pendente',
+      'confirmado',
+      'em_preparacao',
+      'instalacao_realizada',
+      'cancelado'
+    );
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS public.agendamentos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -132,43 +222,290 @@ CREATE TABLE IF NOT EXISTS public.agendamentos (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Índice único parcial para evitar DUPLO AGENDAMENTO no mesmo horário
+-- ÍNDICE ÚNICO CONDICIONAL: Evita concorrência e agendamento duplo no mesmo dia e horário
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agendamentos_sem_conflito
 ON public.agendamentos (data_instalacao, horario_instalacao)
 WHERE status != 'cancelado';
 
 -- ----------------------------------------------------------------------------
--- 7. TABELA: USUARIOS / ADMIN (Segurança, Hash SHA-256 e 2FA)
+-- 8. TABELA: CONFIGURACOES DA AGENDA
 -- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.usuarios (
+CREATE TABLE IF NOT EXISTS public.configuracoes_agenda (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    nome VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    telefone VARCHAR(20),
-    senha_hash VARCHAR(255) NOT NULL,
-    two_factor_enabled BOOLEAN NOT NULL DEFAULT false,
-    two_factor_channel VARCHAR(10) DEFAULT 'email',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    horario_inicial VARCHAR(5) NOT NULL DEFAULT '08:00',
+    horario_final VARCHAR(5) NOT NULL DEFAULT '18:00',
+    duracao_minutos INT NOT NULL DEFAULT 120,
+    intervalo_minutos INT NOT NULL DEFAULT 30,
+    dias_funcionamento INT[] NOT NULL DEFAULT '{1,2,3,4,5,6,0}',
+    datas_bloqueadas DATE[] NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Inserir admin inicial
-INSERT INTO public.usuarios (nome, email, telefone, senha_hash, two_factor_enabled, two_factor_channel)
-VALUES ('Tamara Produções', 'admin@decorart.com.br', '(85) 99867-2404', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', false, 'email')
-ON CONFLICT (email) DO NOTHING;
+-- ----------------------------------------------------------------------------
+-- 9. FUNÇÃO ATÔMICA: RESERVA SEGURA DE AGENDAMENTO (PREVENÇÃO DE CONCORRÊNCIA)
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.criar_agendamento_seguro(
+    p_numero_pedido VARCHAR(50),
+    p_tema_id UUID,
+    p_tema_nome VARCHAR(100),
+    p_produto_id UUID,
+    p_produto_nome VARCHAR(255),
+    p_cliente_nome VARCHAR(255),
+    p_cliente_whatsapp VARCHAR(20),
+    p_cliente_email VARCHAR(255),
+    p_tipo_evento VARCHAR(100),
+    p_data_evento DATE,
+    p_data_instalacao DATE,
+    p_horario_instalacao VARCHAR(10),
+    p_endereco VARCHAR(255),
+    p_numero VARCHAR(50),
+    p_bairro VARCHAR(100),
+    p_cidade VARCHAR(100),
+    p_ponto_referencia VARCHAR(255),
+    p_observacoes TEXT,
+    p_valor_total NUMERIC(10, 2)
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_conflito BOOLEAN;
+  v_agendamento_id UUID;
+  v_cliente_id UUID;
+BEGIN
+  -- 1. Checagem atômica de disponibilidade
+  SELECT EXISTS (
+    SELECT 1 FROM public.agendamentos
+    WHERE data_instalacao = p_data_instalacao
+      AND horario_instalacao = p_horario_instalacao
+      AND status != 'cancelado'
+  ) INTO v_conflito;
+
+  IF v_conflito THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'code', 'HORARIO_OCUPADO',
+      'message', '⚠️ Este horário acabou de ser reservado. Escolha outro horário.'
+    );
+  END IF;
+
+  -- 2. Localizar ou registrar cliente
+  SELECT id INTO v_cliente_id FROM public.clientes WHERE whatsapp = p_cliente_whatsapp LIMIT 1;
+  IF v_cliente_id IS NULL THEN
+    INSERT INTO public.clientes (nome, whatsapp, email)
+    VALUES (p_cliente_nome, p_cliente_whatsapp, p_cliente_email)
+    RETURNING id INTO v_cliente_id;
+  END IF;
+
+  -- 3. Inserir o agendamento
+  INSERT INTO public.agendamentos (
+    numero_pedido,
+    tema_id,
+    tema_nome,
+    produto_id,
+    produto_nome,
+    cliente_id,
+    cliente_nome,
+    cliente_whatsapp,
+    cliente_email,
+    tipo_evento,
+    data_evento,
+    data_instalacao,
+    horario_instalacao,
+    endereco,
+    numero,
+    bairro,
+    cidade,
+    ponto_referencia,
+    observacoes,
+    valor_total,
+    status
+  ) VALUES (
+    p_numero_pedido,
+    p_tema_id,
+    p_tema_nome,
+    p_produto_id,
+    p_produto_nome,
+    v_cliente_id,
+    p_cliente_nome,
+    p_cliente_whatsapp,
+    p_cliente_email,
+    p_tipo_evento,
+    p_data_evento,
+    p_data_instalacao,
+    p_horario_instalacao,
+    p_endereco,
+    p_numero,
+    p_bairro,
+    p_cidade,
+    p_ponto_referencia,
+    p_observacoes,
+    p_valor_total,
+    'pendente'
+  ) RETURNING id INTO v_agendamento_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'id', v_agendamento_id,
+    'numero_pedido', p_numero_pedido,
+    'message', 'Pedido registrado com sucesso'
+  );
+EXCEPTION
+  WHEN unique_violation THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'code', 'CONCORRENCIA_HORARIO',
+      'message', '⚠️ Este horário acabou de ser reservado. Escolha outro horário.'
+    );
+END;
+$$;
 
 -- ----------------------------------------------------------------------------
--- 8. STORAGE BUCKET CONFIGURATION (Supabase Storage)
+-- 10. ROW LEVEL SECURITY (RLS) EM TODAS AS TABELAS
+-- ----------------------------------------------------------------------------
+
+-- Ativar RLS
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.empresa ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.temas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.produto_imagens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agendamentos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.configuracoes_agenda ENABLE ROW LEVEL SECURITY;
+
+-- Limpar policies anteriores se existirem
+DROP POLICY IF EXISTS "Perfis: leitura do próprio ou por admin" ON public.profiles;
+DROP POLICY IF EXISTS "Perfis: atualização apenas do próprio perfil" ON public.profiles;
+DROP POLICY IF EXISTS "Empresa: leitura pública" ON public.empresa;
+DROP POLICY IF EXISTS "Empresa: escrita apenas admin" ON public.empresa;
+DROP POLICY IF EXISTS "Temas: leitura pública de ativos ou admin" ON public.temas;
+DROP POLICY IF EXISTS "Temas: escrita apenas admin" ON public.temas;
+DROP POLICY IF EXISTS "Produtos: leitura pública de ativos ou admin" ON public.produtos;
+DROP POLICY IF EXISTS "Produtos: escrita apenas admin" ON public.produtos;
+DROP POLICY IF EXISTS "Produto Imagens: leitura pública" ON public.produto_imagens;
+DROP POLICY IF EXISTS "Produto Imagens: escrita apenas admin" ON public.produto_imagens;
+DROP POLICY IF EXISTS "Clientes: acesso apenas admin" ON public.clientes;
+DROP POLICY IF EXISTS "Agendamentos: criação pública" ON public.agendamentos;
+DROP POLICY IF EXISTS "Agendamentos: leitura apenas admin ou próprio cliente" ON public.agendamentos;
+DROP POLICY IF EXISTS "Agendamentos: atualização apenas admin" ON public.agendamentos;
+DROP POLICY IF EXISTS "Agendamentos: exclusão apenas admin" ON public.agendamentos;
+DROP POLICY IF EXISTS "Configurações: leitura pública" ON public.configuracoes_agenda;
+DROP POLICY IF EXISTS "Configurações: escrita apenas admin" ON public.configuracoes_agenda;
+
+-- POLICIES: PROFILES
+CREATE POLICY "Perfis: leitura do próprio ou por admin"
+ON public.profiles FOR SELECT
+USING (auth.uid() = id OR public.is_admin());
+
+CREATE POLICY "Perfis: atualização apenas do próprio perfil"
+ON public.profiles FOR UPDATE
+USING (auth.uid() = id OR public.is_admin())
+WITH CHECK (auth.uid() = id OR public.is_admin());
+
+-- POLICIES: EMPRESA
+CREATE POLICY "Empresa: leitura pública"
+ON public.empresa FOR SELECT
+USING (true);
+
+CREATE POLICY "Empresa: escrita apenas admin"
+ON public.empresa FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- POLICIES: TEMAS
+CREATE POLICY "Temas: leitura pública de ativos ou admin"
+ON public.temas FOR SELECT
+USING (ativo = true OR public.is_admin());
+
+CREATE POLICY "Temas: escrita apenas admin"
+ON public.temas FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- POLICIES: PRODUTOS
+CREATE POLICY "Produtos: leitura pública de ativos ou admin"
+ON public.produtos FOR SELECT
+USING (ativo = true OR public.is_admin());
+
+CREATE POLICY "Produtos: escrita apenas admin"
+ON public.produtos FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- POLICIES: PRODUTO_IMAGENS
+CREATE POLICY "Produto Imagens: leitura pública"
+ON public.produto_imagens FOR SELECT
+USING (true);
+
+CREATE POLICY "Produto Imagens: escrita apenas admin"
+ON public.produto_imagens FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- POLICIES: CLIENTES (Dados protegidos de clientes são exclusivos do Admin)
+CREATE POLICY "Clientes: acesso apenas admin"
+ON public.clientes FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- POLICIES: AGENDAMENTOS (Clientes podem apenas criar; leitura e gestão são restritas a Admin)
+CREATE POLICY "Agendamentos: criação pública"
+ON public.agendamentos FOR INSERT
+WITH CHECK (true);
+
+CREATE POLICY "Agendamentos: leitura apenas admin ou próprio cliente"
+ON public.agendamentos FOR SELECT
+USING (public.is_admin());
+
+CREATE POLICY "Agendamentos: atualização apenas admin"
+ON public.agendamentos FOR UPDATE
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+CREATE POLICY "Agendamentos: exclusão apenas admin"
+ON public.agendamentos FOR DELETE
+USING (public.is_admin());
+
+-- POLICIES: CONFIGURAÇÕES DA AGENDA
+CREATE POLICY "Configurações: leitura pública"
+ON public.configuracoes_agenda FOR SELECT
+USING (true);
+
+CREATE POLICY "Configurações: escrita apenas admin"
+ON public.configuracoes_agenda FOR ALL
+USING (public.is_admin())
+WITH CHECK (public.is_admin());
+
+-- ----------------------------------------------------------------------------
+-- 11. STORAGE BUCKET CONFIGURATION (Supabase Storage)
 -- ----------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('decoracoes', 'decoracoes', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Política de leitura pública para as imagens
+DROP POLICY IF EXISTS "Imagens públicas de decorações" ON storage.objects;
 CREATE POLICY "Imagens públicas de decorações"
 ON storage.objects FOR SELECT
 USING (bucket_id = 'decoracoes');
 
--- Política de upload para usuários autenticados
+DROP POLICY IF EXISTS "Upload permitido apenas para administradores" ON storage.objects;
 CREATE POLICY "Upload permitido apenas para administradores"
 ON storage.objects FOR INSERT
-WITH CHECK (bucket_id = 'decoracoes');
+WITH CHECK (bucket_id = 'decoracoes' AND public.is_admin());
+
+-- ----------------------------------------------------------------------------
+-- 12. INSTRUÇÃO PARA CRIAR O PRIMEIRO ADMINISTRADOR COM SEGURANÇA
+-- ----------------------------------------------------------------------------
+-- No console do Supabase (SQL Editor ou Authentication):
+-- Para criar o primeiro administrador sem expor senhas no frontend:
+--
+-- 1. Acesse Authentication -> Users -> "Invite User" ou "Add User".
+-- 2. Crie com o e-mail: admin@decorart.com.br (ou o e-mail oficial da empresa).
+-- 3. Defina a senha com segurança.
+-- 4. No SQL Editor, promova o usuário criado para 'admin':
+--    UPDATE public.profiles
+--    SET role = 'admin'
+--    WHERE email = 'admin@decorart.com.br';
+-- ============================================================================

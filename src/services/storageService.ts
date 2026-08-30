@@ -11,6 +11,7 @@ import {
   TwoFactorState,
 } from '../types';
 import { CONFIGURACOES_AGENDA_PADRAO, SITE_CONFIG } from '../config/siteConfig';
+import { authService } from './authService';
 
 const STORAGE_KEYS = {
   EMPRESA: 'tamara_empresa_v2',
@@ -410,6 +411,7 @@ class StorageService {
   }
 
   saveEmpresaConfig(config: Partial<EmpresaConfig>): EmpresaConfig {
+    authService.requireAdmin();
     const atual = this.getEmpresaConfig();
     const updated: EmpresaConfig = {
       ...atual,
@@ -456,6 +458,7 @@ class StorageService {
   }
 
   saveTema(tema: Omit<Tema, 'id' | 'createdAt'> & { id?: string }): Tema {
+    authService.requireAdmin();
     const list = this.getTemas();
     let saved: Tema;
 
@@ -493,6 +496,7 @@ class StorageService {
   }
 
   deleteTema(id: string): boolean {
+    authService.requireAdmin();
     const list = this.getTemas();
     const filtered = list.filter((t) => t.id !== id);
     if (filtered.length !== list.length) {
@@ -504,6 +508,7 @@ class StorageService {
   }
 
   toggleTemaAtivo(id: string): boolean {
+    authService.requireAdmin();
     const list = this.getTemas();
     const item = list.find((t) => t.id === id);
     if (item) {
@@ -542,6 +547,7 @@ class StorageService {
   }
 
   saveProduto(produto: Omit<Produto, 'id' | 'createdAt'> & { id?: string }): Produto {
+    authService.requireAdmin();
     const list = this.getProdutos();
     let saved: Produto;
 
@@ -585,6 +591,7 @@ class StorageService {
   }
 
   deleteProduto(id: string): boolean {
+    authService.requireAdmin();
     const list = this.getProdutos();
     const filtered = list.filter((p) => p.id !== id);
     if (filtered.length !== list.length) {
@@ -596,6 +603,7 @@ class StorageService {
   }
 
   toggleProdutoAtivo(id: string): boolean {
+    authService.requireAdmin();
     const list = this.getProdutos();
     const item = list.find((p) => p.id === id);
     if (item) {
@@ -663,10 +671,21 @@ class StorageService {
     return this.getAgendamentos().find((a) => a.id === id || a.numeroPedido === id);
   }
 
+  isHorarioDisponivel(dataStr: string, horarioStr: string): boolean {
+    const disponiveis = this.getHorariosDisponiveis(dataStr);
+    const slot = disponiveis.find((s) => s.horario === horarioStr);
+    return Boolean(slot && slot.disponivel);
+  }
+
   createAgendamento(data: Omit<Agendamento, 'id' | 'numeroPedido' | 'createdAt' | 'status'>): Agendamento {
+    // 1. Verificação atômica estrita de disponibilidade de horário
+    if (!this.isHorarioDisponivel(data.instalacao.data, data.instalacao.horario)) {
+      throw new Error('⚠️ Este horário acabou de ser reservado. Escolha outro horário.');
+    }
+
     const list = this.getAgendamentos();
 
-    // Verificação de conflito no horário
+    // Dupla checagem contra conflito de horário no mesmo dia
     const conflito = list.some(
       (a) =>
         a.instalacao.data === data.instalacao.data &&
@@ -675,13 +694,13 @@ class StorageService {
     );
 
     if (conflito) {
-      throw new Error('Este horário já foi agendado por outro cliente. Por favor, escolha outro horário.');
+      throw new Error('⚠️ Este horário acabou de ser reservado. Escolha outro horário.');
     }
 
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const anoAtual = new Date().getFullYear();
-    const numeroPedido = `#TP-${anoAtual}-${randomSuffix}`;
-    const newId = `ag-${Date.now()}`;
+    // Gerar número de pedido padronizado (Ex: #000123)
+    const numeroSeq = (123 + list.length).toString().padStart(6, '0');
+    const numeroPedido = `#${numeroSeq}`;
+    const newId = `ag-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newAgendamento: Agendamento = {
       ...data,
@@ -693,15 +712,22 @@ class StorageService {
 
     list.unshift(newAgendamento);
     localStorage.setItem(STORAGE_KEYS.AGENDAMENTOS, JSON.stringify(list));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('agendamentos_updated'));
+    }
     return newAgendamento;
   }
 
   updateAgendamentoStatus(id: string, status: StatusAgendamento): boolean {
+    authService.requireAdmin();
     const list = this.getAgendamentos();
     const item = list.find((a) => a.id === id);
     if (item) {
       item.status = status;
       localStorage.setItem(STORAGE_KEYS.AGENDAMENTOS, JSON.stringify(list));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('agendamentos_updated'));
+      }
       return true;
     }
     return false;
@@ -717,10 +743,12 @@ class StorageService {
   }
 
   saveConfiguracoes(config: ConfiguracoesAgenda): void {
+    authService.requireAdmin();
     localStorage.setItem(STORAGE_KEYS.CONFIGURACOES, JSON.stringify(config));
   }
 
   bloquearData(dataStr: string): void {
+    authService.requireAdmin();
     const config = this.getConfiguracoes();
     if (!config.datasBloqueadas.includes(dataStr)) {
       config.datasBloqueadas.push(dataStr);
@@ -729,12 +757,14 @@ class StorageService {
   }
 
   liberarData(dataStr: string): void {
+    authService.requireAdmin();
     const config = this.getConfiguracoes();
     config.datasBloqueadas = config.datasBloqueadas.filter((d) => d !== dataStr);
     this.saveConfiguracoes(config);
   }
 
   bloquearHorario(dataStr: string, horario: string): void {
+    authService.requireAdmin();
     const config = this.getConfiguracoes();
     if (!config.horariosBloqueados) config.horariosBloqueados = {};
     if (!config.horariosBloqueados[dataStr]) config.horariosBloqueados[dataStr] = [];
@@ -745,6 +775,7 @@ class StorageService {
   }
 
   liberarHorario(dataStr: string, horario: string): void {
+    authService.requireAdmin();
     const config = this.getConfiguracoes();
     if (config.horariosBloqueados && config.horariosBloqueados[dataStr]) {
       config.horariosBloqueados[dataStr] = config.horariosBloqueados[dataStr].filter(
@@ -817,148 +848,62 @@ class StorageService {
 
   // =============================================================
   // 6. PERFIL DO ADMIN & SEGURANÇA (MINHA CONTA, HASH, 2FA)
+  // Delegado de forma estrita para authService
   // =============================================================
   getAdminProfile(): AdminUser {
-    this.initStorage();
-    const data = localStorage.getItem(STORAGE_KEYS.ADMIN_PROFILE);
-    if (!data) return INITIAL_ADMIN_USER;
-    try {
-      return JSON.parse(data);
-    } catch {
-      return INITIAL_ADMIN_USER;
-    }
+    return authService.getAdminProfile();
   }
 
   saveAdminProfile(profile: Partial<AdminUser>): AdminUser {
-    const atual = this.getAdminProfile();
-    const updated: AdminUser = {
-      ...atual,
-      ...profile,
-    };
-    localStorage.setItem(STORAGE_KEYS.ADMIN_PROFILE, JSON.stringify(updated));
-    return updated;
+    authService.requireAdmin();
+    return authService.saveAdminProfile(profile);
   }
 
   async updateAdminPassword(senhaAtual: string, novaSenha: string): Promise<{ success: boolean; message: string }> {
-    const admin = this.getAdminProfile();
-    const hashAtual = await sha256(senhaAtual);
-
-    if (hashAtual !== admin.senhaHash) {
-      return { success: false, message: 'Senha atual incorreta.' };
-    }
-
-    if (novaSenha.length < 6) {
-      return { success: false, message: 'A nova senha deve ter no mínimo 6 caracteres.' };
-    }
-
-    const novoHash = await sha256(novaSenha);
-    this.saveAdminProfile({ senhaHash: novoHash });
-    return { success: true, message: 'Senha alterada com sucesso!' };
+    return authService.updateAdminPassword(senhaAtual, novaSenha);
   }
 
   // -------------------------------------------------------------
-  // 2FA - AUTENTICAÇÃO EM DUAS ETAPAS REAL
+  // 2FA - AUTENTICAÇÃO EM DUAS ETAPAS
   // -------------------------------------------------------------
   is2FAEnabled(): boolean {
-    return this.getAdminProfile().twoFactorEnabled;
+    return authService.getAdminProfile().twoFactorEnabled;
   }
 
   set2FAEnabled(enabled: boolean, channel: 'email' | 'sms' = 'email'): void {
-    this.saveAdminProfile({ twoFactorEnabled: enabled, twoFactorChannel: channel });
+    authService.requireAdmin();
+    authService.saveAdminProfile({ twoFactorEnabled: enabled, twoFactorChannel: channel });
   }
 
-  // Gera código aleatório criptográfico com 5 minutos de expiração
   generate2FACode(): { code: string; destination: string } {
-    const admin = this.getAdminProfile();
-    // Código aleatório de 6 dígitos
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutos de validade
-
-    const destination =
-      admin.twoFactorChannel === 'sms'
-        ? admin.telefone || '(85) 99867-2404'
-        : admin.email || 'admin@decorart.com.br';
-
-    const state: TwoFactorState = {
-      code,
-      expiresAt,
-      attempts: 0,
-      destination,
-    };
-
-    localStorage.setItem(STORAGE_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
-    return { code, destination };
+    return authService.generate2FACode();
   }
 
   get2FAState(): TwoFactorState | null {
-    const data = localStorage.getItem(STORAGE_KEYS.TWO_FACTOR_STATE);
-    return data ? JSON.parse(data) : null;
+    return authService.get2FAState();
   }
 
   verify2FACode(inputCode: string): { success: boolean; message: string } {
-    const state = this.get2FAState();
-    if (!state || !state.code || !state.expiresAt) {
-      return { success: false, message: 'Nenhum código ativo. Solicite um novo código.' };
-    }
-
-    // Checagem de expiração temporal
-    if (Date.now() > state.expiresAt) {
-      localStorage.removeItem(STORAGE_KEYS.TWO_FACTOR_STATE);
-      return { success: false, message: 'Código expirado (validade de 5 minutos). Solicite um novo código.' };
-    }
-
-    // Limite estrito de 3 tentativas
-    if (state.attempts >= 3) {
-      localStorage.removeItem(STORAGE_KEYS.TWO_FACTOR_STATE);
-      return { success: false, message: 'Limite de 3 tentativas excedido. O código foi bloqueado por segurança. Solicite um novo.' };
-    }
-
-    if (inputCode.trim() !== state.code) {
-      state.attempts += 1;
-      localStorage.setItem(STORAGE_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
-      const restantes = 3 - state.attempts;
-      return {
-        success: false,
-        message: `Código incorreto. Você tem mais ${restantes} ${restantes === 1 ? 'tentativa' : 'tentativas'}.`,
-      };
-    }
-
-    // Sucesso absoluto: código validado
-    localStorage.removeItem(STORAGE_KEYS.TWO_FACTOR_STATE);
-    localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
-    return { success: true, message: 'Autenticação em duas etapas realizada com sucesso!' };
+    return authService.verify2FACode(inputCode);
   }
 
   // -------------------------------------------------------------
   // AUTENTICAÇÃO GERAL
   // -------------------------------------------------------------
   isAdminAuthenticated(): boolean {
-    return localStorage.getItem(STORAGE_KEYS.ADMIN_AUTH) === 'true';
+    return authService.isAdmin();
   }
 
   async loginStep1(email: string, pass: string): Promise<{ success: boolean; requires2FA: boolean; message?: string }> {
-    const admin = this.getAdminProfile();
-    const hash = await sha256(pass);
-
-    if (email.toLowerCase().trim() === admin.email.toLowerCase().trim() && hash === admin.senhaHash) {
-      if (admin.twoFactorEnabled) {
-        this.generate2FACode();
-        return { success: true, requires2FA: true };
-      } else {
-        localStorage.setItem(STORAGE_KEYS.ADMIN_AUTH, 'true');
-        return { success: true, requires2FA: false };
-      }
-    }
-
-    return { success: false, requires2FA: false, message: 'E-mail ou senha incorretos.' };
+    return authService.loginAdmin(email, pass);
   }
 
   logoutAdmin(): void {
-    localStorage.removeItem(STORAGE_KEYS.ADMIN_AUTH);
-    localStorage.removeItem(STORAGE_KEYS.TWO_FACTOR_STATE);
+    authService.logout();
   }
 
   resetToDemo(): void {
+    authService.requireAdmin();
     localStorage.setItem(STORAGE_KEYS.EMPRESA, JSON.stringify(SITE_CONFIG));
     localStorage.setItem(STORAGE_KEYS.TEMAS, JSON.stringify(INITIAL_TEMAS));
     localStorage.setItem(STORAGE_KEYS.PRODUTOS, JSON.stringify(INITIAL_PRODUTOS));

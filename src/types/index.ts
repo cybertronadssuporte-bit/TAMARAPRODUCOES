@@ -122,6 +122,34 @@ export interface AdminUser {
   senhaHash: string; // Hash SHA-256
   twoFactorEnabled: boolean;
   twoFactorChannel: 'email' | 'sms';
+  role?: 'admin';
+}
+
+export type UserRole = 'admin' | 'customer';
+
+export interface UserProfile {
+  id: string;
+  nome: string;
+  email: string;
+  role: UserRole;
+  telefone?: string;
+  createdAt?: string;
+}
+
+export interface AuthSession {
+  user: UserProfile;
+  role: UserRole;
+  token: string;
+  expiresAt: number;
+}
+
+export interface RequisitosSenha {
+  minimo8: boolean;
+  maiuscula: boolean;
+  minuscula: boolean;
+  numero: boolean;
+  especial: boolean;
+  todosValidos: boolean;
 }
 
 export interface TwoFactorState {
@@ -130,3 +158,4 @@ export interface TwoFactorState {
   attempts: number;
   destination: string; // Email ou telefone onde foi enviado
 }
+

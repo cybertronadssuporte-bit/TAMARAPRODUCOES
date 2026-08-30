@@ -29,6 +29,7 @@ import { StorageImage } from '../common/StorageImage';
 interface AdminLayoutProps {
   onLogout: () => void;
   onGoToSite: () => void;
+  initialTab?: AdminTab;
 }
 
 export type AdminTab =
@@ -41,8 +42,9 @@ export type AdminTab =
   | 'conta'
   | 'seguranca';
 
-export const AdminLayout: React.FC<AdminLayoutProps> = ({ onLogout, onGoToSite }) => {
-  const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+export const AdminLayout: React.FC<AdminLayoutProps> = ({ onLogout, onGoToSite, initialTab = 'dashboard' }) => {
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
+
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [empresa, setEmpresa] = useState<EmpresaConfig>(() => storageService.getEmpresaConfig());
   const [pendingCount, setPendingCount] = useState(0);
