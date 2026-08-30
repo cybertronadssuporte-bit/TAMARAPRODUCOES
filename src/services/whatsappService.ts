@@ -4,24 +4,42 @@ import { storageService } from './storageService';
 export const whatsappService = {
   /**
    * Formata a mensagem oficial com base no modelo exigido da Tamara Produções
+   * Construída em UTF-8 puro para preservar rigorosamente emojis, acentos e quebras de linha.
    */
   gerarMensagemConfirmacaoCliente(agendamento: Agendamento): string {
-    const nomeDecoracao = agendamento.produtoNome || agendamento.decoracaoNome || 'Decoração';
-    const nomeTema = agendamento.temaNome || 'Geral';
+    let nomeDecoracao = (agendamento.produtoNome || agendamento.decoracaoNome || 'Decoração').trim();
+    if (nomeDecoracao.toLowerCase().includes('homem-aranha') && !nomeDecoracao.includes('🕷️')) {
+      nomeDecoracao = `🕷️ ${nomeDecoracao}`;
+    }
+
+    const nomeTema = agendamento.temaNome || 'Aniversários';
 
     // Formatar data do evento (DD/MM/AAAA)
-    const [anoEv, mesEv, diaEv] = (agendamento.evento.dataEvento || agendamento.instalacao.data).split('-');
+    const rawDataEvento = agendamento.evento.dataEvento || agendamento.instalacao.data;
+    const [anoEv, mesEv, diaEv] = rawDataEvento.split('-');
     const dataEventoFormatada = `${diaEv}/${mesEv}/${anoEv}`;
 
     // Formatar data de instalação (DD/MM/AAAA)
     const [anoInst, mesInst, diaInst] = agendamento.instalacao.data.split('-');
     const dataInstalacaoFormatada = `${diaInst}/${mesInst}/${anoInst}`;
 
-    // Formatar valor em BRL
-    const valorFormatado = (agendamento.valorTotal || 0).toLocaleString('pt-BR', {
-      style: 'currency',
-      currency: 'BRL',
-    });
+    // Formatar valor em BRL com espaço ASCII padrão (evita non-breaking space do toLocaleString)
+    const valorNum = (agendamento.valorTotal || 0).toFixed(2).replace('.', ',');
+    const valorFormatado = `R$ ${valorNum}`;
+
+    // Formatar endereço limpo e elegante
+    const endRaw = agendamento.evento.endereco.trim();
+    const numRaw = (agendamento.evento.numero || '').trim();
+    const enderecoLinha = numRaw && !endRaw.includes(numRaw)
+      ? `${endRaw}, ${numRaw}`
+      : endRaw;
+
+    const bairroRaw = (agendamento.evento.bairro || '').trim();
+    const bairroLinha = bairroRaw.toLowerCase().startsWith('bairro')
+      ? bairroRaw
+      : `Bairro ${bairroRaw}`;
+
+    const cidadeLinha = (agendamento.evento.cidade || '').trim();
 
     const obs = agendamento.evento.observacoes?.trim()
       ? agendamento.evento.observacoes.trim()
@@ -39,9 +57,9 @@ export const whatsappService = {
       `👤 Cliente: ${agendamento.cliente.nome}\n` +
       `📱 WhatsApp: ${agendamento.cliente.whatsapp}\n\n` +
       `📍 Endereço:\n` +
-      `${agendamento.evento.endereco}, ${agendamento.evento.numero || 'S/N'}\n` +
-      `Bairro ${agendamento.evento.bairro}\n` +
-      `${agendamento.evento.cidade}\n\n` +
+      `${enderecoLinha}\n` +
+      `${bairroLinha}\n` +
+      `${cidadeLinha}\n\n` +
       `📝 Observações:\n` +
       `${obs}\n\n` +
       `Gostaria de confirmar meu pedido.`
@@ -50,14 +68,14 @@ export const whatsappService = {
 
   /**
    * Retorna o link oficial codificado do WhatsApp da Tamara Produções (+55 85 99867-2404)
+   * A mensagem é codificada diretamente em UTF-8 com encodeURIComponent
    */
   getLinkConfirmacaoParaEmpresa(agendamento: Agendamento): string {
-    const empresa = storageService.getEmpresaConfig();
     const mensagem = this.gerarMensagemConfirmacaoCliente(agendamento);
-    const numeroLimpo = (empresa.whatsapp || '5585998672404').replace(/\D/g, '');
-    const numeroOficial = numeroLimpo.startsWith('55') ? numeroLimpo : `55${numeroLimpo}`;
+    const numeroOficial = '5585998672404';
     return `https://wa.me/${numeroOficial}?text=${encodeURIComponent(mensagem)}`;
   },
+
 
   /**
    * Abre o WhatsApp de maneira inteligente conforme o dispositivo (mobile / desktop)

@@ -133,30 +133,44 @@ export const authService = {
 
   /**
    * Verifica se o usuário autenticado atual possui privilégios de ADMINISTRADOR
+   * Proteção REAL: validação estrita do token de sessão e role='admin'
+   * Nenhuma flag de localStorage é aceita como bypass.
    */
   isAdmin(): boolean {
     const session = this.getSession();
-    if (session && session.role === 'admin') return true;
-    return typeof localStorage !== 'undefined' && localStorage.getItem('tamara_admin_auth_v2') === 'true';
+    if (!session || !session.token) return false;
+    // Se a sessão expirou, invalida
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+      this.logout();
+      return false;
+    }
+    // Permissão concedida SOMENTE se role === 'admin'
+    return session.role === 'admin';
   },
 
-
   /**
-   * Verifica se o usuário é um CLIENTE comum
+   * Verifica se o usuário é um CLIENTE comum (role = 'customer')
    */
   isCustomer(): boolean {
     const session = this.getSession();
-    return Boolean(session && session.role === 'customer');
+    if (!session) return false;
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+      this.logout();
+      return false;
+    }
+    return session.role === 'customer';
   },
 
   /**
-   * Guarda de segurança para rotinas administrativas: lança erro se não for admin
+   * Guarda de segurança rigorosa para rotinas administrativas:
+   * Lança erro se a requisição não vier de um administrador autenticado.
    */
   requireAdmin(): void {
     if (!this.isAdmin()) {
-      throw new Error('Acesso não autorizado: Esta operação exige privilégios de administrador.');
+      throw new Error('Acesso não autorizado: Esta operação é confidencial e restrita a administradores.');
     }
   },
+
 
   /**
    * Cria uma sessão segura
@@ -255,12 +269,19 @@ export const authService = {
     const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'; // Admin@Tamara2026!
     const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'; // admin123
 
-    const isSenhaValida =
-      hash === admin.senhaHash ||
-      hash === HASH_TAMARA ||
-      hash === HASH_LEGADO ||
-      cleanSenha === 'Admin@Tamara2026!' ||
-      cleanSenha === 'admin123';
+    let isSenhaValida = false;
+    // Se a senha já foi alterada pelo administrador, somente a nova senha salva é válida!
+    if ((admin as any).senhaAlteradaPeloUsuario) {
+      isSenhaValida = hash === admin.senhaHash;
+    } else {
+      // Enquanto não foi alterada, aceita a senha padrão inicial ou legada
+      isSenhaValida =
+        hash === admin.senhaHash ||
+        hash === HASH_TAMARA ||
+        hash === HASH_LEGADO ||
+        cleanSenha === 'Admin@Tamara2026!' ||
+        cleanSenha === 'admin123';
+    }
 
     const isEmailValido =
       cleanEmail === admin.email.toLowerCase().trim() ||
@@ -270,7 +291,6 @@ export const authService = {
       cleanEmail === 'admin';
 
     if (isEmailValido && isSenhaValida) {
-      localStorage.setItem('tamara_admin_auth_v2', 'true');
 
       if (admin.twoFactorEnabled) {
         this.generate2FACode();
@@ -403,11 +423,23 @@ export const authService = {
     this.requireAdmin();
 
     const admin = this.getAdminProfile();
-    const hashAtual = await sha256(senhaAtual);
+    const cleanSenhaAtual = senhaAtual.trim();
+    const hashAtual = await sha256(cleanSenhaAtual);
 
-    const isSenhaAtualCorreta =
-      hashAtual === admin.senhaHash ||
-      (admin.senhaHash === INITIAL_ADMIN_HASH && hashAtual === '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9');
+    const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'; // Admin@Tamara2026!
+    const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'; // admin123
+
+    let isSenhaAtualCorreta = false;
+    if ((admin as any).senhaAlteradaPeloUsuario) {
+      isSenhaAtualCorreta = hashAtual === admin.senhaHash;
+    } else {
+      isSenhaAtualCorreta =
+        hashAtual === admin.senhaHash ||
+        hashAtual === HASH_TAMARA ||
+        hashAtual === HASH_LEGADO ||
+        cleanSenhaAtual === 'Admin@Tamara2026!' ||
+        cleanSenhaAtual === 'admin123';
+    }
 
     if (!isSenhaAtualCorreta) {
       return {
@@ -450,11 +482,14 @@ export const authService = {
       }
     }
 
-    // 2. Atualizar no perfil local criptografado
+    // 2. Atualizar no perfil local criptografado com a nova senha
     const novoHash = await sha256(novaSenha);
-    this.saveAdminProfile({ senhaHash: novoHash });
+    this.saveAdminProfile({
+      senhaHash: novoHash,
+      senhaAlteradaPeloUsuario: true,
+    } as any);
 
-    // 3. Invalidação de sessões anteriores por segurança
+    // 3. Invalidação obrigatória de todas as sessões anteriores por segurança
     this.logout();
 
     return {
@@ -468,9 +503,8 @@ export const authService = {
    */
   logout(): void {
     localStorage.removeItem(AUTH_KEYS.SESSION);
-    localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
-    // Limpar chaves legadas se houver
     localStorage.removeItem('tamara_admin_auth_v2');
+    localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
 
     if (isSupabaseConnected && supabase) {
       supabase.auth.signOut().catch(() => {});
@@ -481,3 +515,4 @@ export const authService = {
     }
   },
 };
+

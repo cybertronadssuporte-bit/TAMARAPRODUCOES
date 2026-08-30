@@ -872,10 +872,7 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                 <div className="flex justify-between items-center border-t border-gray-100 pt-2">
                   <span className="text-gray-500 font-medium">Valor:</span>
                   <span className="font-bold text-emerald-700 text-sm">
-                    {(agendamentoConfirmado.valorTotal || 0).toLocaleString('pt-BR', {
-                      style: 'currency',
-                      currency: 'BRL',
-                    })}
+                    R$ {(agendamentoConfirmado.valorTotal || 0).toFixed(2).replace('.', ',')}
                   </span>
                 </div>
               </div>
@@ -886,14 +883,12 @@ export const BookingWizard: React.FC<BookingWizardProps> = ({
                   href={whatsappService.getLinkConfirmacaoParaEmpresa(agendamentoConfirmado)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={() => {
-                    whatsappService.abrirWhatsAppConfirmacao(agendamentoConfirmado);
-                  }}
                   className="w-full min-h-[50px] py-3.5 px-6 rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-bold text-xs sm:text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2.5 transition-all transform active:scale-98"
                 >
                   <Send className="w-4 h-4" />
                   <span>CONFIRMAR PELO WHATSAPP</span>
                 </a>
+
 
                 <button
                   onClick={onClose}

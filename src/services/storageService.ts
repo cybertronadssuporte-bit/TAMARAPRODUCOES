@@ -656,7 +656,12 @@ class StorageService {
   // =============================================================
   // 4. AGENDAMENTOS (Criação, Status, Conflitos de Agenda)
   // =============================================================
-  getAgendamentos(): Agendamento[] {
+
+  /**
+   * Método interno estrito para checagem interna de disponibilidade de horários
+   * Não expõe dados de agendamentos ou clientes para fora do serviço.
+   */
+  private getAgendamentosInterno(): Agendamento[] {
     this.initStorage();
     const data = localStorage.getItem(STORAGE_KEYS.AGENDAMENTOS);
     if (!data) return INITIAL_AGENDAMENTOS;
@@ -667,9 +672,20 @@ class StorageService {
     }
   }
 
-  getAgendamentoById(id: string): Agendamento | undefined {
-    return this.getAgendamentos().find((a) => a.id === id || a.numeroPedido === id);
+  /**
+   * API administrativa confidencial: EXCLUSIVA para role='admin'.
+   * Clientes comuns e visitantes têm o acesso negado com exceção imediata.
+   */
+  getAgendamentos(): Agendamento[] {
+    authService.requireAdmin();
+    return this.getAgendamentosInterno();
   }
+
+  getAgendamentoById(id: string): Agendamento | undefined {
+    authService.requireAdmin();
+    return this.getAgendamentosInterno().find((a) => a.id === id || a.numeroPedido === id);
+  }
+
 
   isHorarioDisponivel(dataStr: string, horarioStr: string): boolean {
     const disponiveis = this.getHorariosDisponiveis(dataStr);
@@ -683,7 +699,7 @@ class StorageService {
       throw new Error('⚠️ Este horário acabou de ser reservado. Escolha outro horário.');
     }
 
-    const list = this.getAgendamentos();
+    const list = this.getAgendamentosInterno();
 
     // Dupla checagem contra conflito de horário no mesmo dia
     const conflito = list.some(
@@ -787,7 +803,7 @@ class StorageService {
 
   getHorariosDisponiveis(dataStr: string): HorarioSlot[] {
     const config = this.getConfiguracoes();
-    const agendamentos = this.getAgendamentos();
+    const agendamentos = this.getAgendamentosInterno();
 
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);

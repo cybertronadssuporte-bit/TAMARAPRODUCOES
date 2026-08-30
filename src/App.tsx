@@ -182,8 +182,8 @@ export const App: React.FC = () => {
 
   // --- SE FOR A ÁREA ADMINISTRATIVA ---
   if (isAdminView) {
-    // 1. Se não estiver autenticado como ADMIN, exige login
-    if (!isAdminAuth) {
+    // 1. Bloqueio estrito: Se não for administrador autenticado com role='admin', exige login
+    if (!isAdminAuth || !authService.isAdmin()) {
       return (
         <AdminLogin
           onLoginSuccess={() => {
@@ -194,6 +194,7 @@ export const App: React.FC = () => {
         />
       );
     }
+
 
     // 2. Autenticado com role = 'admin' comprovada: carrega o painel administrativo
     return (
