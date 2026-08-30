@@ -23,9 +23,9 @@ interface AdminLoginProps {
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackToSite }) => {
   const [empresa] = useState(() => storageService.getEmpresaConfig());
 
-  // Etapa 1: Credenciais
-  const [email, setEmail] = useState('');
-  const [senha, setSenha] = useState('');
+  // Etapa 1: Credenciais Padrão
+  const [email, setEmail] = useState('admin@decorart.com.br');
+  const [senha, setSenha] = useState('Admin@Tamara2026!');
   const [showSenha, setShowSenha] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -150,14 +150,15 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
             <form onSubmit={handleStep1Submit} className="space-y-4 text-xs">
               <div>
                 <label className="block font-bold uppercase tracking-wider text-gray-300 mb-1.5">
-                  E-mail do Administrador
+                  E-mail ou Usuário do Administrador
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={email}
+                    placeholder="admin@decorart.com.br"
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:border-gold-400 focus:ring-1 focus:ring-gold-400 outline-none transition-all"
                   />
@@ -174,6 +175,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                     type={showSenha ? 'text' : 'password'}
                     required
                     value={senha}
+                    placeholder="Digite sua senha"
                     onChange={(e) => setSenha(e.target.value)}
                     className="w-full pl-10 pr-10 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:border-gold-400 focus:ring-1 focus:ring-gold-400 outline-none transition-all"
                   />
@@ -181,6 +183,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                     type="button"
                     onClick={() => setShowSenha(!showSenha)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+                    aria-label={showSenha ? 'Ocultar senha' : 'Exibir senha'}
                   >
                     {showSenha ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
@@ -191,7 +194,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-gold-500 via-gold-400 to-gold-500 hover:from-gold-600 hover:to-gold-400 text-noir-950 font-bold text-xs uppercase tracking-wider shadow-luxury flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-gold-500 via-gold-400 to-gold-500 hover:from-gold-600 hover:to-gold-400 text-noir-950 font-bold text-xs uppercase tracking-wider shadow-luxury flex items-center justify-center gap-2 transition-all disabled:opacity-50 active:scale-98"
                 >
                   {loading ? (
                     <span>Verificando...</span>
@@ -204,11 +207,35 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 </button>
               </div>
 
-              {/* Dica de acesso padrão */}
-              <div className="pt-3 border-t border-white/10 text-center">
+              {/* Botões rápidos de preenchimento de teste */}
+              <div className="pt-3 border-t border-white/10 text-center space-y-2">
                 <p className="text-[11px] text-gray-400">
-                  Credenciais padrão: <strong className="text-gray-300">admin@decorart.com.br</strong> / senha: <strong className="text-gray-300">admin123</strong>
+                  Clique abaixo para preencher automaticamente:
                 </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('admin@decorart.com.br');
+                      setSenha('Admin@Tamara2026!');
+                      setErrorMsg(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-gold-400/15 hover:bg-gold-400/25 border border-gold-400/30 text-gold-300 text-[11px] font-semibold transition-all"
+                  >
+                    🔑 Usar Senha Forte (Admin@Tamara2026!)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('admin@decorart.com.br');
+                      setSenha('admin123');
+                      setErrorMsg(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-gray-300 text-[11px] font-medium transition-all"
+                  >
+                    Usar Senha admin123
+                  </button>
+                </div>
               </div>
             </form>
           ) : (
