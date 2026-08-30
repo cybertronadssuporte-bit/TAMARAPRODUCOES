@@ -127,19 +127,30 @@ export const authService = {
   initAdminProfile(): AdminUser {
     const existing = localStorage.getItem(AUTH_KEYS.ADMIN_PROFILE);
     if (!existing) {
-      localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(DEFAULT_ADMIN));
-      return DEFAULT_ADMIN;
+      const initialProfile = {
+        ...DEFAULT_ADMIN,
+        senhaAlteradaPeloUsuario: false,
+      };
+      localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(initialProfile));
+      return initialProfile as any;
     }
     try {
       const parsed = JSON.parse(existing);
-      // Garantir role='admin'
       parsed.role = 'admin';
+      // Se a senha no armazenamento for a inicial padrão, ela ainda não foi alterada pelo usuário
+      if (
+        parsed.senhaHash === INITIAL_ADMIN_HASH ||
+        parsed.senhaHash === '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'
+      ) {
+        parsed.senhaAlteradaPeloUsuario = false;
+      }
       return parsed;
     } catch {
       localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(DEFAULT_ADMIN));
       return DEFAULT_ADMIN;
     }
   },
+
 
   getAdminProfile(): AdminUser {
     return this.initAdminProfile();
@@ -314,11 +325,20 @@ export const authService = {
     const HASH_TAMARA = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
     const HASH_LEGADO = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 
-    // Senha válida se bate com o hash salvo no perfil ou com qualquer um dos hashes de administração padrão
-    const isSenhaValida =
-      hash === admin.senhaHash ||
-      hash === HASH_TAMARA ||
-      hash === HASH_LEGADO;
+    // REGRA DE SEGURANÇA ESTRITA:
+    // Não aceitar senhas padrões depois que a senha for alterada pelo administrador!
+    let isSenhaValida = false;
+    if ((admin as any).senhaAlteradaPeloUsuario) {
+      // Depois de alterada, SOMENTE a nova senha cadastrada é válida. Senhas padrões são recusadas!
+      isSenhaValida = hash === admin.senhaHash;
+    } else {
+      // Enquanto não for alterada pelo administrador, aceita a senha padrão inicial
+      isSenhaValida =
+        hash === admin.senhaHash ||
+        hash === HASH_TAMARA ||
+        hash === HASH_LEGADO;
+    }
+
 
     const isEmailValido =
       cleanEmail === 'admin' ||
