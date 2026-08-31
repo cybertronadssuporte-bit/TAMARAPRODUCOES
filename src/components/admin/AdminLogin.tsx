@@ -41,8 +41,11 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
     setErrorMsg(null);
     setLoading(true);
 
+    const cleanEmail = email.trim();
+    const cleanSenha = senha.trim();
+
     try {
-      const res = await storageService.loginStep1(email, senha);
+      const res = await storageService.loginStep1(cleanEmail, cleanSenha);
 
       if (!res.success) {
         setErrorMsg(res.message || 'Credenciais inválidas.');
@@ -153,11 +156,14 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                   E-mail ou Usuário do Administrador
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     name="username"
                     autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     value={email}
                     placeholder="admin@exemplo.com"
@@ -172,11 +178,14 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                   Senha de Acesso
                 </label>
                 <div className="relative">
-                  <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <Lock className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type={showSenha ? 'text' : 'password'}
                     name="password"
                     autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     value={senha}
                     placeholder="••••••••••••"
@@ -233,6 +242,12 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 <input
                   type="text"
                   maxLength={6}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   autoFocus
                   value={codigo2FA}
                   onChange={(e) => setCodigo2FA(e.target.value.replace(/\D/g, ''))}

@@ -28,22 +28,8 @@ const STORAGE_KEYS = {
 // Hash criptográfico SHA-256 inicial do administrador
 const DEFAULT_SENHA_HASH = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
 
-// Função utilitária para hash seguro SHA-256 no navegador
-export async function sha256(message: string): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) {
-    // Fallback simples caso crypto.subtle não esteja disponível
-    let hash = 0;
-    for (let i = 0; i < message.length; i++) {
-      hash = (hash << 5) - hash + message.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16);
-  }
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+// Reutiliza a função canônica de SHA-256 resiliente e determinística de authService
+export { sha256 } from './authService';
 
 // -------------------------------------------------------------
 // SEED DATA: TEMAS INICIAIS
