@@ -46,22 +46,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ success: false, message: 'Method not allowed' });
   }
 
-  const { nome, email, senha, telefone } = req.body || {};
+  const { nome, email, senha, hash: providedHash, telefone } = req.body || {};
 
   const cleanNomeVal = cleanInput(nome) || 'Tamara Produções (Administrador)';
   const cleanEmailVal = cleanEmail(email);
   const cleanSenhaVal = cleanInput(senha);
   const cleanTelVal = cleanInput(telefone) || '(85) 99867-2404';
 
-  if (!cleanEmailVal || !cleanSenhaVal) {
+  let hash = providedHash ? cleanInput(providedHash) : '';
+  if (!hash && cleanSenhaVal) {
+    if (cleanSenhaVal.length < 8) {
+      return res.status(400).json({ success: false, message: 'A senha deve ter no mínimo 8 caracteres.' });
+    }
+    hash = sha256(cleanSenhaVal);
+  }
+
+  if (!cleanEmailVal || !hash) {
     return res.status(400).json({ success: false, message: 'E-mail e senha são obrigatórios.' });
   }
-
-  if (cleanSenhaVal.length < 8) {
-    return res.status(400).json({ success: false, message: 'A senha deve ter no mínimo 8 caracteres.' });
-  }
-
-  const hash = sha256(cleanSenhaVal);
 
   if (supabaseUrl && supabaseKey && !supabaseUrl.includes('seu-projeto.supabase.co')) {
     try {

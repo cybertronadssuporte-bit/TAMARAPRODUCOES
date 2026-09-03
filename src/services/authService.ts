@@ -274,13 +274,13 @@ export const authService = {
 
       if (res.ok) {
         const data = await res.json();
-        if (data) {
-          const isConfigured = Boolean(data.isConfigured && data.admin_senha_hash);
+        // Se a nuvem possui um administrador configurado com credenciais válidas, atualiza o cache local
+        if (data && data.isConfigured && data.admin_senha_hash && data.admin_email) {
           const merged: AdminUser = {
             ...local,
-            email: data.admin_email || local.email,
-            senhaHash: data.admin_senha_hash || local.senhaHash,
-            isConfigured,
+            email: data.admin_email,
+            senhaHash: data.admin_senha_hash,
+            isConfigured: true,
             twoFactorEnabled: data.two_factor_enabled ?? local.twoFactorEnabled,
             twoFactorChannel: data.two_factor_channel || local.twoFactorChannel,
             nome: data.admin_nome || local.nome,
@@ -300,13 +300,12 @@ export const authService = {
     if (isSupabaseConnected && supabase) {
       try {
         const { data: rpcData, error: rpcErr } = await supabase.rpc('get_admin_sync_data');
-        if (!rpcErr && rpcData) {
-          const isConfigured = Boolean(rpcData.isConfigured && rpcData.admin_senha_hash);
+        if (!rpcErr && rpcData && rpcData.isConfigured && rpcData.admin_senha_hash && rpcData.admin_email) {
           const merged: AdminUser = {
             ...local,
-            email: rpcData.admin_email || local.email,
-            senhaHash: rpcData.admin_senha_hash || local.senhaHash,
-            isConfigured,
+            email: rpcData.admin_email,
+            senhaHash: rpcData.admin_senha_hash,
+            isConfigured: true,
             twoFactorEnabled: rpcData.two_factor_enabled ?? local.twoFactorEnabled,
             twoFactorChannel: rpcData.two_factor_channel || local.twoFactorChannel,
             nome: rpcData.admin_nome || local.nome,
@@ -320,6 +319,20 @@ export const authService = {
       } catch {
         // Mantém perfil local
       }
+    }
+
+    // Se a nuvem não tinha configuração, mas o local já está configurado, sincroniza o local para a nuvem
+    if (local.isConfigured && local.senhaHash && local.email) {
+      fetch('/api/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: local.nome,
+          email: local.email,
+          hash: local.senhaHash,
+          telefone: local.telefone,
+        }),
+      }).catch(() => {});
     }
 
     return local;

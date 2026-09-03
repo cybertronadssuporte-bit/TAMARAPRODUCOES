@@ -60,12 +60,20 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
         if (mounted) {
           const configured = Boolean(profile.isConfigured && profile.senhaHash && profile.email);
           setIsSetupMode(!configured);
+          if (configured && profile.email) {
+            setEmail((prev) => prev || profile.email);
+          }
           setCheckingStatus(false);
         }
       })
       .catch(() => {
         if (mounted) {
-          setIsSetupMode(!authService.isAdminConfigured());
+          const isConfig = authService.isAdminConfigured();
+          setIsSetupMode(!isConfig);
+          if (isConfig) {
+            const p = authService.getAdminProfile();
+            if (p.email) setEmail((prev) => prev || p.email);
+          }
           setCheckingStatus(false);
         }
       });
