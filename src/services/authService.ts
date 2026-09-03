@@ -8,6 +8,73 @@ const AUTH_KEYS = {
   CUSTOMER_PROFILES: 'tamara_customer_profiles_v1',
 };
 
+// Camada de armazenamento segura e resiliente (suporta Safari Private Browsing, ITP, WebViews e cotas restritas)
+const memoryStorage: Record<string, string> = {};
+
+export const safeStorage = {
+  getItem(key: string): string | null {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const val = window.localStorage.getItem(key);
+        if (val !== null) return val;
+      }
+    } catch {
+      // Fallback para sessionStorage ou memória se o localStorage falhar
+    }
+
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const val = window.sessionStorage.getItem(key);
+        if (val !== null) return val;
+      }
+    } catch {
+      // Fallback em memória
+    }
+
+    return memoryStorage[key] || null;
+  },
+
+  setItem(key: string, value: string): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+      }
+    } catch {
+      // localStorage indisponível ou em modo privado restrito
+    }
+
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.setItem(key, value);
+      }
+    } catch {
+      // sessionStorage indisponível
+    }
+
+    memoryStorage[key] = value;
+  },
+
+  removeItem(key: string): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore
+    }
+
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore
+    }
+
+    delete memoryStorage[key];
+  },
+};
+
 // Hash SHA-256 pré-calculado para o administrador inicial padrão
 const INITIAL_ADMIN_HASH = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
 
@@ -23,12 +90,12 @@ const DEFAULT_ADMIN: AdminUser = {
   role: 'admin',
 };
 
-// Sanitizador avançado de inputs de login (remove espaços invisíveis Unicode, zero-width, normaliza pontuações de iPhone)
+// Sanitizador avançado de inputs de login (remove caracteres invisíveis Unicode, zero-width, normaliza pontuações de iPhone)
 export function cleanMobileInput(val: string): string {
   if (!val) return '';
   return val
-    // Remove caracteres de largura zero e marcas de ordem de byte invisíveis (inseridos frequentemente por teclados virtuais/colagens no iOS)
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    // Remove caracteres de largura zero, marcas de ordem de byte invisíveis e caracteres de controle
+    .replace(/[\u200B-\u200D\uFEFF\u0000-\u001F\u007F-\u009F]/g, '')
     // Substitui todos os tipos de espaços não separáveis ou de formatação por espaço regular
     .replace(/[\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
     // Normaliza aspas curvas do iOS "Smart Punctuation" para aspas retas ASCII
@@ -36,6 +103,15 @@ export function cleanMobileInput(val: string): string {
     .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
     // Normaliza travessões e hifens do iOS para hífen padrão ASCII
     .replace(/[\u2013\u2014]/g, '-')
+    .trim();
+}
+
+// Sanitizador especializado para e-mails (remove espaços acidentais de teclado móvel, caracteres invisíveis e normaliza minúsculas)
+export function cleanMobileEmail(val: string): string {
+  if (!val) return '';
+  return cleanMobileInput(val)
+    .toLowerCase()
+    .replace(/\s+/g, '') // Remove qualquer espaço no meio/início/fim acidentalmente inserido pelo iOS
     .trim();
 }
 
@@ -130,11 +206,12 @@ export const authService = {
    * Validação detalhada dos requisitos de segurança da senha
    */
   validarRequisitosSenha(senha: string): RequisitosSenha {
-    const minimo8 = senha.length >= 8;
-    const maiuscula = /[A-Z]/.test(senha);
-    const minuscula = /[a-z]/.test(senha);
-    const numero = /[0-9]/.test(senha);
-    const especial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(senha);
+    const limpa = cleanMobileInput(senha);
+    const minimo8 = limpa.length >= 8;
+    const maiuscula = /[A-Z]/.test(limpa);
+    const minuscula = /[a-z]/.test(limpa);
+    const numero = /[0-9]/.test(limpa);
+    const especial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(limpa);
 
     return {
       minimo8,
@@ -150,13 +227,13 @@ export const authService = {
    * Inicializa o perfil do administrador seguro caso não exista
    */
   initAdminProfile(): AdminUser {
-    const existing = localStorage.getItem(AUTH_KEYS.ADMIN_PROFILE);
+    const existing = safeStorage.getItem(AUTH_KEYS.ADMIN_PROFILE);
     if (!existing) {
       const initialProfile = {
         ...DEFAULT_ADMIN,
         senhaAlteradaPeloUsuario: false,
       };
-      localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(initialProfile));
+      safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(initialProfile));
       return initialProfile as any;
     }
     try {
@@ -164,18 +241,19 @@ export const authService = {
       parsed.role = 'admin';
       // Se a senha no armazenamento for a inicial padrão, ela ainda não foi alterada pelo usuário
       if (
+        !parsed.senhaHash ||
         parsed.senhaHash === INITIAL_ADMIN_HASH ||
         parsed.senhaHash === '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9'
       ) {
         parsed.senhaAlteradaPeloUsuario = false;
+        parsed.senhaHash = INITIAL_ADMIN_HASH;
       }
       return parsed;
     } catch {
-      localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(DEFAULT_ADMIN));
+      safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(DEFAULT_ADMIN));
       return DEFAULT_ADMIN;
     }
   },
-
 
   getAdminProfile(): AdminUser {
     return this.initAdminProfile();
@@ -188,7 +266,7 @@ export const authService = {
       ...data,
       role: 'admin', // Impede qualquer alteração de role
     };
-    localStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(updated));
+    safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(updated));
     return updated;
   },
 
@@ -196,7 +274,7 @@ export const authService = {
    * Retorna a sessão ativa
    */
   getSession(): AuthSession | null {
-    const data = localStorage.getItem(AUTH_KEYS.SESSION);
+    const data = safeStorage.getItem(AUTH_KEYS.SESSION);
     if (!data) return null;
     try {
       const session: AuthSession = JSON.parse(data);
@@ -267,7 +345,6 @@ export const authService = {
     }
   },
 
-
   /**
    * Cria uma sessão segura
    */
@@ -284,7 +361,7 @@ export const authService = {
       expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 horas de validade
     };
 
-    localStorage.setItem(AUTH_KEYS.SESSION, JSON.stringify(session));
+    safeStorage.setItem(AUTH_KEYS.SESSION, JSON.stringify(session));
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('auth_state_changed', { detail: session }));
     }
@@ -293,19 +370,22 @@ export const authService = {
 
   /**
    * Login do Administrador (Etapa 1: Credenciais + verificação de Role)
+   * Compatibilidade total com iPhone/Safari, Android e Desktop
    */
   async loginAdmin(
     email: string,
     senhaDigitada: string
   ): Promise<{ success: boolean; requires2FA: boolean; message?: string }> {
-    const cleanEmail = email.toLowerCase().trim();
+    const cleanEmail = cleanMobileEmail(email);
+    const cleanSenha = cleanMobileInput(senhaDigitada);
+    const trimSenha = (senhaDigitada || '').trim();
 
     // 1. Se o Supabase estiver conectado, tentar autenticar via Supabase Auth
     if (isSupabaseConnected && supabase) {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
-          password: senhaDigitada,
+          password: cleanSenha || trimSenha || senhaDigitada,
         });
 
         if (!error && data?.user) {
@@ -338,14 +418,17 @@ export const authService = {
           }
         }
       } catch {
-        // Prossegue para a autenticação local
+        // Prossegue para a autenticação local resiliente
       }
     }
 
     // 2. Autenticação Local / Segura (Fallback Sincronizado e Resiliente)
     const admin = this.getAdminProfile();
-    const cleanSenha = cleanMobileInput(senhaDigitada);
-    const hash = await sha256(cleanSenha);
+    
+    // Calcula os hashes das representações sanitizadas e diretas para eliminar divergências de teclado
+    const hashClean = await sha256(cleanSenha);
+    const hashTrim = await sha256(trimSenha);
+    const hashRaw = await sha256(senhaDigitada || '');
 
     // Hashes seguros da senha padrão inicial e suas variações decorrentes do teclado mobile
     const HASH_TAMARA_FORTE = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'; // Admin@Tamara2026!
@@ -361,38 +444,55 @@ export const authService = {
     const HASH_TAMARA_SIMPLES_NOEX_MIN = '2148e90530ca43eb4c75874e5d4a904aff946783ecebba15784da909e40fd359'; // tamara2026
 
     // REGRA DE SEGURANÇA ESTRITA:
-    // Não aceitar senhas padrões depois que a senha for alterada pelo administrador!
+    // Não aceitar senhas padrões se a senha tiver sido alterada explicitamente pelo administrador
     let isSenhaValida = false;
+    const adminHash = admin.senhaHash;
+
     if ((admin as any).senhaAlteradaPeloUsuario) {
-      // Depois de alterada, SOMENTE a nova senha cadastrada é válida. Senhas padrões são recusadas!
-      isSenhaValida = hash === admin.senhaHash;
+      // Depois de alterada, valida contra o hash da nova senha cadastrada (com ou sem tratamento mobile)
+      isSenhaValida =
+        hashClean === adminHash ||
+        hashTrim === adminHash ||
+        hashRaw === adminHash;
     } else {
       // Enquanto não for alterada pelo administrador, aceita a senha padrão inicial e variações de digitação mobile
+      const padroes = [
+        adminHash,
+        HASH_TAMARA_FORTE,
+        HASH_TAMARA_MINUSCULO,
+        HASH_TAMARA_VARIACAO,
+        HASH_TAMARA_SEM_EXCLAMA,
+        HASH_TAMARA_MIN_SEM_EXCLAMA,
+        HASH_LEGADO,
+        HASH_LEGADO_MAIUSCULO,
+        HASH_TAMARA_SIMPLES,
+        HASH_TAMARA_SIMPLES_MIN,
+        HASH_TAMARA_SIMPLES_NOEX,
+        HASH_TAMARA_SIMPLES_NOEX_MIN,
+      ];
+
       isSenhaValida =
-        hash === admin.senhaHash ||
-        hash === HASH_TAMARA_FORTE ||
-        hash === HASH_TAMARA_MINUSCULO ||
-        hash === HASH_TAMARA_VARIACAO ||
-        hash === HASH_TAMARA_SEM_EXCLAMA ||
-        hash === HASH_TAMARA_MIN_SEM_EXCLAMA ||
-        hash === HASH_LEGADO ||
-        hash === HASH_LEGADO_MAIUSCULO ||
-        hash === HASH_TAMARA_SIMPLES ||
-        hash === HASH_TAMARA_SIMPLES_MIN ||
-        hash === HASH_TAMARA_SIMPLES_NOEX ||
-        hash === HASH_TAMARA_SIMPLES_NOEX_MIN;
+        padroes.includes(hashClean) ||
+        padroes.includes(hashTrim) ||
+        padroes.includes(hashRaw);
     }
 
+    const adminEmailNormalized = cleanMobileEmail(admin.email || '');
+
     const isEmailValido =
-      cleanEmail === 'admin' ||
-      cleanEmail === 'tamara' ||
-      cleanEmail === 'tamaraproducoes' ||
-      cleanEmail === 'admin@tamaraproducoes.com.br' ||
-      cleanEmail === 'contato@tamaraproducoes.com.br' ||
-      cleanEmail === 'admin@decorart.com.br' ||
-      cleanEmail === (admin.email || '').toLowerCase().trim() ||
-      cleanEmail.includes('admin') ||
-      cleanEmail.includes('tamara');
+      cleanEmail.length > 0 && (
+        cleanEmail === 'admin' ||
+        cleanEmail === 'tamara' ||
+        cleanEmail === 'tamaraproducoes' ||
+        cleanEmail === 'admin@tamaraproducoes.com.br' ||
+        cleanEmail === 'contato@tamaraproducoes.com.br' ||
+        cleanEmail === 'admin@decorart.com.br' ||
+        cleanEmail === adminEmailNormalized ||
+        (adminEmailNormalized !== '' && cleanEmail === adminEmailNormalized) ||
+        (adminEmailNormalized !== '' && cleanEmail.includes(adminEmailNormalized)) ||
+        cleanEmail.includes('admin') ||
+        cleanEmail.includes('tamara')
+      );
 
     if (isEmailValido && isSenhaValida) {
       if (admin.twoFactorEnabled) {
@@ -416,8 +516,6 @@ export const authService = {
     return { success: false, requires2FA: false, message: 'E-mail ou senha incorretos.' };
   },
 
-
-
   /**
    * Login ou Criação de Cliente Comum (Role: 'customer')
    * Clientes comuns NUNCA recebem role='admin'
@@ -425,9 +523,9 @@ export const authService = {
   loginCustomer(nome: string, email: string, whatsapp: string): AuthSession {
     const customerUser: UserProfile = {
       id: `cust-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      nome: nome.trim(),
-      email: email.toLowerCase().trim(),
-      telefone: whatsapp.trim(),
+      nome: cleanMobileInput(nome),
+      email: cleanMobileEmail(email),
+      telefone: cleanMobileInput(whatsapp),
       role: 'customer',
       createdAt: new Date().toISOString(),
     };
@@ -455,12 +553,12 @@ export const authService = {
       destination,
     };
 
-    localStorage.setItem(AUTH_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
+    safeStorage.setItem(AUTH_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
     return { code, destination };
   },
 
   get2FAState(): TwoFactorState | null {
-    const data = localStorage.getItem(AUTH_KEYS.TWO_FACTOR_STATE);
+    const data = safeStorage.getItem(AUTH_KEYS.TWO_FACTOR_STATE);
     return data ? JSON.parse(data) : null;
   },
 
@@ -474,21 +572,23 @@ export const authService = {
     }
 
     if (Date.now() > state.expiresAt) {
-      localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
+      safeStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
       return { success: false, message: 'Código expirado (validade de 5 minutos). Solicite um novo código.' };
     }
 
     if (state.attempts >= 3) {
-      localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
+      safeStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
       return {
         success: false,
         message: 'Limite de 3 tentativas excedido. O código foi bloqueado por segurança. Solicite um novo.',
       };
     }
 
-    if (inputCode.trim() !== state.code) {
+    const cleanInputCode = cleanMobileInput(inputCode).replace(/\D/g, '');
+
+    if (cleanInputCode !== state.code) {
       state.attempts += 1;
-      localStorage.setItem(AUTH_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
+      safeStorage.setItem(AUTH_KEYS.TWO_FACTOR_STATE, JSON.stringify(state));
       const restantes = 3 - state.attempts;
       return {
         success: false,
@@ -497,7 +597,7 @@ export const authService = {
     }
 
     // Código correto: concede a sessão de administrador
-    localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
+    safeStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
     const admin = this.getAdminProfile();
     this.createSession(
       {
@@ -528,7 +628,11 @@ export const authService = {
 
     const admin = this.getAdminProfile();
     const cleanSenhaAtual = cleanMobileInput(senhaAtual);
-    const hashAtual = await sha256(cleanSenhaAtual);
+    const trimSenhaAtual = (senhaAtual || '').trim();
+
+    const hashAtualClean = await sha256(cleanSenhaAtual);
+    const hashAtualTrim = await sha256(trimSenhaAtual);
+    const hashAtualRaw = await sha256(senhaAtual || '');
 
     const HASH_TAMARA_FORTE = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
     const HASH_TAMARA_MINUSCULO = '9f1eca7ffb9ae32f139db0e21fefd15f36587b6d06c9dddbccdb88798a22dc7f';
@@ -539,21 +643,30 @@ export const authService = {
     const HASH_LEGADO_MAIUSCULO = '3b612c75a7b5048a435fb6ec81e52ff92d6d795a8b5a9c17070f6a63c97a53b2';
 
     let isSenhaAtualCorreta = false;
-    if ((admin as any).senhaAlteradaPeloUsuario) {
-      isSenhaAtualCorreta = hashAtual === admin.senhaHash;
-    } else {
-      // Validação estrita por hash SHA-256 no sistema de autenticação
-      isSenhaAtualCorreta =
-        hashAtual === admin.senhaHash ||
-        hashAtual === HASH_TAMARA_FORTE ||
-        hashAtual === HASH_TAMARA_MINUSCULO ||
-        hashAtual === HASH_TAMARA_VARIACAO ||
-        hashAtual === HASH_TAMARA_SEM_EXCLAMA ||
-        hashAtual === HASH_TAMARA_MIN_SEM_EXCLAMA ||
-        hashAtual === HASH_LEGADO ||
-        hashAtual === HASH_LEGADO_MAIUSCULO;
-    }
+    const adminHash = admin.senhaHash;
 
+    if ((admin as any).senhaAlteradaPeloUsuario) {
+      isSenhaAtualCorreta =
+        hashAtualClean === adminHash ||
+        hashAtualTrim === adminHash ||
+        hashAtualRaw === adminHash;
+    } else {
+      const padroes = [
+        adminHash,
+        HASH_TAMARA_FORTE,
+        HASH_TAMARA_MINUSCULO,
+        HASH_TAMARA_VARIACAO,
+        HASH_TAMARA_SEM_EXCLAMA,
+        HASH_TAMARA_MIN_SEM_EXCLAMA,
+        HASH_LEGADO,
+        HASH_LEGADO_MAIUSCULO,
+      ];
+
+      isSenhaAtualCorreta =
+        padroes.includes(hashAtualClean) ||
+        padroes.includes(hashAtualTrim) ||
+        padroes.includes(hashAtualRaw);
+    }
 
     if (!isSenhaAtualCorreta) {
       return {
@@ -578,26 +691,28 @@ export const authService = {
       };
     }
 
+    const cleanNovaSenha = cleanMobileInput(novaSenha);
+
     // 1. Se estiver conectado ao Supabase, atualizar no Supabase Auth
     if (isSupabaseConnected && supabase) {
       try {
-        const { error } = await supabase.auth.updateUser({ password: novaSenha });
+        const { error } = await supabase.auth.updateUser({ password: cleanNovaSenha });
         if (error) {
           return {
             success: false,
             message: `❌ Não foi possível alterar a senha no servidor: ${error.message}`,
           };
         }
-      } catch (err: any) {
+      } catch {
         return {
           success: false,
-          message: '❌ Não foi possível alterar a senha. Verifique sua senha atual e tente novamente.',
+          message: '❌ Não foi possível alterar a senha. Verifique sua conexão e tente novamente.',
         };
       }
     }
 
-    // 2. Atualizar no perfil local criptografado com a nova senha
-    const novoHash = await sha256(novaSenha);
+    // 2. Atualizar no perfil local criptografado com a nova senha sanitizada
+    const novoHash = await sha256(cleanNovaSenha);
     this.saveAdminProfile({
       senhaHash: novoHash,
       senhaAlteradaPeloUsuario: true,
@@ -616,9 +731,9 @@ export const authService = {
    * Encerra a sessão e limpa credenciais temporárias
    */
   logout(): void {
-    localStorage.removeItem(AUTH_KEYS.SESSION);
-    localStorage.removeItem('tamara_admin_auth_v2');
-    localStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
+    safeStorage.removeItem(AUTH_KEYS.SESSION);
+    safeStorage.removeItem('tamara_admin_auth_v2');
+    safeStorage.removeItem(AUTH_KEYS.TWO_FACTOR_STATE);
 
     if (isSupabaseConnected && supabase) {
       supabase.auth.signOut().catch(() => {});
@@ -629,4 +744,5 @@ export const authService = {
     }
   },
 };
+
 

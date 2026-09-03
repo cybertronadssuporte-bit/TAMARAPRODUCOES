@@ -331,13 +331,14 @@ const INITIAL_AGENDAMENTOS: Agendamento[] = [
 ];
 
 const INITIAL_ADMIN_USER: AdminUser = {
-  id: 'admin-tamara-01',
-  nome: 'Tamara Produções',
-  email: 'contato@tamaraproducoes.com.br',
+  id: 'admin-master-tamara',
+  nome: 'Tamara Produções (Administrador)',
+  email: 'admin@tamaraproducoes.com.br',
   telefone: '(85) 99867-2404',
   senhaHash: DEFAULT_SENHA_HASH,
   twoFactorEnabled: false,
   twoFactorChannel: 'email',
+  role: 'admin',
 };
 
 class StorageService {
@@ -372,10 +373,8 @@ class StorageService {
       );
     }
 
-    // Perfil do Administrador
-    if (!localStorage.getItem(STORAGE_KEYS.ADMIN_PROFILE)) {
-      localStorage.setItem(STORAGE_KEYS.ADMIN_PROFILE, JSON.stringify(INITIAL_ADMIN_USER));
-    }
+    // Inicialização sincronizada do perfil de administrador seguro
+    authService.initAdminProfile();
   }
 
   constructor() {

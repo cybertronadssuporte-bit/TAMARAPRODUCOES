@@ -13,6 +13,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { storageService } from '../../services/storageService';
+import { cleanMobileEmail, cleanMobileInput } from '../../services/authService';
 import { StorageImage } from '../common/StorageImage';
 
 interface AdminLoginProps {
@@ -41,8 +42,14 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
     setErrorMsg(null);
     setLoading(true);
 
-    const cleanEmail = email.trim();
-    const cleanSenha = senha.trim();
+    const cleanEmail = cleanMobileEmail(email);
+    const cleanSenha = cleanMobileInput(senha);
+
+    if (!cleanEmail || !cleanSenha) {
+      setErrorMsg('Por favor, preencha o e-mail e a senha.');
+      setLoading(false);
+      return;
+    }
 
     try {
       const res = await storageService.loginStep1(cleanEmail, cleanSenha);
@@ -79,14 +86,16 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
     e.preventDefault();
     setErrorMsg(null);
 
-    if (codigo2FA.length !== 6) {
+    const cleanCode = cleanMobileInput(codigo2FA).replace(/\D/g, '');
+
+    if (cleanCode.length !== 6) {
       setErrorMsg('Por favor, informe os 6 dígitos do código.');
       return;
     }
 
     setLoading(true);
 
-    const res = storageService.verify2FACode(codigo2FA);
+    const res = storageService.verify2FACode(cleanCode);
     setLoading(false);
 
     if (res.success) {
@@ -158,9 +167,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 <div className="relative">
                   <Mail className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
-                    type="text"
+                    type="email"
                     name="username"
-                    autoComplete="username"
+                    autoComplete="username email"
+                    inputMode="email"
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}

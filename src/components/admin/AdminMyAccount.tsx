@@ -15,7 +15,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { storageService } from '../../services/storageService';
-import { authService } from '../../services/authService';
+import { authService, cleanMobileEmail, cleanMobileInput } from '../../services/authService';
 import { AdminUser } from '../../types';
 
 interface AdminMyAccountProps {
@@ -54,11 +54,15 @@ export const AdminMyAccount: React.FC<AdminMyAccountProps> = ({ onRefresh }) => 
   // Salvar Dados Cadastrais
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!nome.trim()) {
+    const cleanNomeVal = cleanMobileInput(nome);
+    const cleanEmailVal = cleanMobileEmail(email);
+    const cleanTelVal = cleanMobileInput(telefone);
+
+    if (!cleanNomeVal) {
       setErrorMsg('O nome do administrador é obrigatório.');
       return;
     }
-    if (!email.trim()) {
+    if (!cleanEmailVal) {
       setErrorMsg('O e-mail é obrigatório.');
       return;
     }
@@ -68,12 +72,15 @@ export const AdminMyAccount: React.FC<AdminMyAccountProps> = ({ onRefresh }) => 
 
     try {
       const updated = storageService.saveAdminProfile({
-        nome: nome.trim(),
-        email: email.trim(),
-        telefone: telefone.trim(),
+        nome: cleanNomeVal,
+        email: cleanEmailVal,
+        telefone: cleanTelVal,
       });
 
       setProfile(updated);
+      setNome(updated.nome);
+      setEmail(updated.email);
+      setTelefone(updated.telefone);
       setSuccessMsg('Dados cadastrais atualizados com sucesso!');
       setTimeout(() => setSuccessMsg(null), 3500);
       onRefresh();
@@ -89,7 +96,11 @@ export const AdminMyAccount: React.FC<AdminMyAccountProps> = ({ onRefresh }) => 
     e.preventDefault();
     setPasswordErrorMsg(null);
 
-    if (!senhaAtual.trim()) {
+    const cleanSenhaAtual = cleanMobileInput(senhaAtual);
+    const cleanNova = cleanMobileInput(novaSenha);
+    const cleanConf = cleanMobileInput(confirmarNovaSenha);
+
+    if (!cleanSenhaAtual) {
       setPasswordErrorMsg('Por favor, informe a senha atual.');
       return;
     }
@@ -99,7 +110,7 @@ export const AdminMyAccount: React.FC<AdminMyAccountProps> = ({ onRefresh }) => 
       return;
     }
 
-    if (novaSenha !== confirmarNovaSenha) {
+    if (cleanNova !== cleanConf) {
       setPasswordErrorMsg('A confirmação de senha não coincide com a nova senha digitada.');
       return;
     }
