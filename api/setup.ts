@@ -1,32 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
-
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  '';
-
-function sha256(str: string): string {
-  return crypto.createHash('sha256').update(str).digest('hex');
-}
-
-function cleanInput(val: string): string {
-  if (!val) return '';
-  return val
-    .replace(/[\u200B-\u200D\uFEFF\u0000-\u001F\u007F-\u009F]/g, '')
-    .replace(/[\u00A0\u1680\u180e\u2000-\u200a\u202f\u205f\u3000]/g, ' ')
-    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-    .replace(/[\u2013\u2014]/g, '-')
-    .trim();
-}
-
-function cleanEmail(val: string): string {
-  return cleanInput(val).toLowerCase().replace(/\s+/g, '').trim();
-}
+import { getAdminRecord, saveAdminRecord, sha256, cleanEmail, cleanInput } from './_db';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -65,43 +38,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ success: false, message: 'E-mail e senha são obrigatórios.' });
   }
 
-  if (supabaseUrl && supabaseKey && !supabaseUrl.includes('seu-projeto.supabase.co')) {
-    try {
-      const supabase = createClient(supabaseUrl, supabaseKey);
+  try {
+    const existing = await getAdminRecord();
 
-      // 1. Tentar RPC segura
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('setup_first_admin_secure', {
-        p_nome: cleanNomeVal,
-        p_email: cleanEmailVal,
-        p_senha_hash: hash,
-        p_telefone: cleanTelVal,
+    // Se já existir administrador configurado no banco e não for atualização autorizada
+    if (existing && existing.exists && existing.senhaHash && existing.email !== cleanEmailVal) {
+      return res.status(400).json({
+        success: false,
+        message: 'O administrador do site já foi cadastrado anteriormente.',
       });
-
-      if (!rpcErr && rpcData && rpcData.success) {
-        return res.status(200).json({ success: true, message: 'Administrador configurado com sucesso na nuvem!' });
-      }
-
-      // 2. Fallback: Update direto na tabela empresa
-      await supabase
-        .from('empresa')
-        .update({
-          admin_nome: cleanNomeVal,
-          admin_email: cleanEmailVal,
-          admin_senha_hash: hash,
-          admin_telefone: cleanTelVal,
-          admin_configured: true,
-          updated_at: new Date().toISOString(),
-        })
-        .neq('id', '00000000-0000-0000-0000-000000000000');
-
-      return res.status(200).json({ success: true, message: 'Administrador configurado com sucesso na nuvem!' });
-    } catch (err: any) {
-      return res.status(500).json({ success: false, message: 'Erro ao conectar ao banco: ' + (err.message || '') });
     }
-  }
 
-  return res.status(200).json({
-    success: true,
-    message: 'Administrador configurado com sucesso!',
-  });
+    // Grava no banco/storage centralizado
+    await saveAdminRecord({
+      exists: true,
+      nome: cleanNomeVal,
+      email: cleanEmailVal,
+      senhaHash: hash,
+      telefone: cleanTelVal,
+      twoFactorEnabled: false,
+      twoFactorChannel: 'email',
+      updatedAt: new Date().toISOString(),
+    });
+
+    const token = `token_admin_${Date.now()}_${Math.random().toString(36).substring(2)}`;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Administrador configurado com sucesso no servidor!',
+      token,
+      user: {
+        id: 'admin-master',
+        nome: cleanNomeVal,
+        email: cleanEmailVal,
+        telefone: cleanTelVal,
+        role: 'admin',
+      },
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      message: 'Erro interno ao cadastrar administrador: ' + (err.message || ''),
+    });
+  }
 }

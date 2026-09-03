@@ -26,8 +26,8 @@ interface AdminLoginProps {
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackToSite }) => {
   const [empresa] = useState(() => storageService.getEmpresaConfig());
 
-  // Estado de configuração: se é Primeiro Acesso ou Login Normal
-  const [isSetupMode, setIsSetupMode] = useState<boolean>(() => !authService.isAdminConfigured());
+  // Estado de configuração: se é Primeiro Acesso ou Login Normal (determinado pelo backend)
+  const [isSetupMode, setIsSetupMode] = useState<boolean>(false);
   const [checkingStatus, setCheckingStatus] = useState(true);
 
   // Campos de Login Normal
@@ -51,29 +51,22 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
   const [twoFactorDestination, setTwoFactorDestination] = useState('');
   const [simulatedAlert, setSimulatedAlert] = useState<string | null>(null);
 
-  // Sincroniza status na nuvem ao carregar a tela
+  // Consulta o BACKEND para determinar se existe administrador cadastrado
   useEffect(() => {
     let mounted = true;
     authService
-      .syncAdminProfileFromCloud()
-      .then((profile) => {
+      .checkAdminStatusOnServer()
+      .then((status) => {
         if (mounted) {
-          const configured = Boolean(profile.isConfigured && profile.senhaHash && profile.email);
-          setIsSetupMode(!configured);
-          if (configured && profile.email) {
-            setEmail((prev) => prev || profile.email);
+          setIsSetupMode(!status.exists);
+          if (status.email) {
+            setEmail((prev) => prev || status.email || '');
           }
           setCheckingStatus(false);
         }
       })
       .catch(() => {
         if (mounted) {
-          const isConfig = authService.isAdminConfigured();
-          setIsSetupMode(!isConfig);
-          if (isConfig) {
-            const p = authService.getAdminProfile();
-            if (p.email) setEmail((prev) => prev || p.email);
-          }
           setCheckingStatus(false);
         }
       });
