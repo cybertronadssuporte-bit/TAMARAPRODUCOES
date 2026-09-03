@@ -25,9 +25,6 @@ const STORAGE_KEYS = {
   TWO_FACTOR_STATE: 'tamara_2fa_state_v2',
 };
 
-// Hash criptográfico SHA-256 inicial do administrador
-const DEFAULT_SENHA_HASH = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
-
 // Reutiliza a função canônica de SHA-256 resiliente e determinística de authService
 export { sha256 } from './authService';
 
@@ -329,17 +326,6 @@ const INITIAL_AGENDAMENTOS: Agendamento[] = [
     createdAt: new Date(Date.now() - 1 * 86400000).toISOString(),
   },
 ];
-
-const INITIAL_ADMIN_USER: AdminUser = {
-  id: 'admin-master-tamara',
-  nome: 'Tamara Produções (Administrador)',
-  email: 'admin@tamaraproducoes.com.br',
-  telefone: '(85) 99867-2404',
-  senhaHash: DEFAULT_SENHA_HASH,
-  twoFactorEnabled: false,
-  twoFactorChannel: 'email',
-  role: 'admin',
-};
 
 class StorageService {
   private initStorage(): void {
@@ -895,7 +881,10 @@ class StorageService {
     return authService.isAdmin();
   }
 
-  async loginStep1(email: string, pass: string): Promise<{ success: boolean; requires2FA: boolean; message?: string }> {
+  async loginStep1(
+    email: string,
+    pass: string
+  ): Promise<{ success: boolean; requires2FA?: boolean; requiresSetup?: boolean; message?: string }> {
     return authService.loginAdmin(email, pass);
   }
 
@@ -910,7 +899,7 @@ class StorageService {
     localStorage.setItem(STORAGE_KEYS.PRODUTOS, JSON.stringify(INITIAL_PRODUTOS));
     localStorage.setItem(STORAGE_KEYS.AGENDAMENTOS, JSON.stringify(INITIAL_AGENDAMENTOS));
     localStorage.setItem(STORAGE_KEYS.CONFIGURACOES, JSON.stringify(CONFIGURACOES_AGENDA_PADRAO));
-    localStorage.setItem(STORAGE_KEYS.ADMIN_PROFILE, JSON.stringify(INITIAL_ADMIN_USER));
+    authService.logout();
     localStorage.removeItem(STORAGE_KEYS.TWO_FACTOR_STATE);
   }
 }

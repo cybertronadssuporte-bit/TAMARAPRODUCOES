@@ -120,6 +120,7 @@ export interface AdminUser {
   email: string;
   telefone: string;
   senhaHash: string; // Hash SHA-256
+  isConfigured?: boolean; // false se ainda não configurou no primeiro acesso
   twoFactorEnabled: boolean;
   twoFactorChannel: 'email' | 'sms';
   role?: 'admin';

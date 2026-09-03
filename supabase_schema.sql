@@ -505,7 +505,7 @@ WITH CHECK (bucket_id = 'decoracoes' AND public.is_admin());
 -- 12. FUNÇÕES RPC SEGURAS PARA AUTENTICAÇÃO E SINCRONIZAÇÃO MULTIPLATAFORMA
 -- ----------------------------------------------------------------------------
 
--- Função para consultar dados públicos de autenticação e hash do administrador
+-- Função para consultar dados de autenticação e status de configuração do administrador
 CREATE OR REPLACE FUNCTION public.get_admin_sync_data()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -515,15 +515,16 @@ AS $$
 DECLARE
   v_empresa RECORD;
 BEGIN
-  SELECT admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone
+  SELECT admin_email, admin_senha_hash, admin_configured, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone
   INTO v_empresa
   FROM public.empresa
   LIMIT 1;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object(
-      'admin_email', 'admin@tamaraproducoes.com.br',
-      'admin_senha_hash', 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+      'isConfigured', false,
+      'admin_email', '',
+      'admin_senha_hash', '',
       'two_factor_enabled', false,
       'two_factor_channel', 'email',
       'admin_nome', 'Tamara Produções (Administrador)',
@@ -532,12 +533,41 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object(
-    'admin_email', COALESCE(v_empresa.admin_email, 'admin@tamaraproducoes.com.br'),
-    'admin_senha_hash', COALESCE(v_empresa.admin_senha_hash, 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'),
+    'isConfigured', COALESCE(v_empresa.admin_configured, false) AND (v_empresa.admin_senha_hash IS NOT NULL AND v_empresa.admin_senha_hash <> ''),
+    'admin_email', COALESCE(v_empresa.admin_email, ''),
+    'admin_senha_hash', COALESCE(v_empresa.admin_senha_hash, ''),
     'two_factor_enabled', COALESCE(v_empresa.two_factor_enabled, false),
     'two_factor_channel', COALESCE(v_empresa.two_factor_channel, 'email'),
     'admin_nome', COALESCE(v_empresa.admin_nome, 'Tamara Produções (Administrador)'),
     'admin_telefone', COALESCE(v_empresa.admin_telefone, '(85) 99867-2404')
+  );
+END;
+$$;
+
+-- Função para configurar o primeiro administrador no Primeiro Acesso
+CREATE OR REPLACE FUNCTION public.setup_first_admin_secure(
+  p_nome TEXT,
+  p_email TEXT,
+  p_senha_hash TEXT,
+  p_telefone TEXT DEFAULT '(85) 99867-2404'
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE public.empresa
+  SET
+    admin_nome = COALESCE(p_nome, 'Tamara Produções (Administrador)'),
+    admin_email = p_email,
+    admin_senha_hash = p_senha_hash,
+    admin_telefone = COALESCE(p_telefone, '(85) 99867-2404'),
+    admin_configured = true,
+    updated_at = timezone('utc'::text, now());
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'message', 'Administrador configurado com sucesso!'
   );
 END;
 $$;
@@ -560,19 +590,9 @@ BEGIN
   FROM public.empresa
   LIMIT 1;
 
-  IF v_current_hash IS NULL THEN
-    v_current_hash := 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
-  END IF;
-
-  -- Validação estrita contra o hash gravado ou variações padrão iniciais
-  IF p_senha_atual_hash = v_current_hash OR
-     (v_current_hash = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18' AND
-      p_senha_atual_hash IN (
-        'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
-        '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
-        '9f1eca7ffb9ae32f139db0e21fefd15f36587b6d06c9dddbccdb88798a22dc7f',
-        'e82865beba92c64fbe54ca94cf32eaaadc384cbea0f03ea1369e02ef149ab590'
-      )) THEN
+  IF v_current_hash IS NULL OR v_current_hash = '' THEN
+    v_is_valid := true;
+  ELSIF p_senha_atual_hash = v_current_hash THEN
     v_is_valid := true;
   END IF;
 
@@ -588,6 +608,7 @@ BEGIN
   SET
     admin_senha_hash = p_nova_senha_hash,
     admin_email = COALESCE(p_admin_email, admin_email),
+    admin_configured = true,
     updated_at = timezone('utc'::text, now());
 
   RETURN jsonb_build_object(
@@ -599,6 +620,7 @@ $$;
 
 -- Permissões públicas para chamada segura das funções RPC
 GRANT EXECUTE ON FUNCTION public.get_admin_sync_data() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.setup_first_admin_secure(TEXT, TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.update_admin_password_secure(TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
 
 -- ============================================================================

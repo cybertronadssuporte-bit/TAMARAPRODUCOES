@@ -41,14 +41,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Fallback para query direta na tabela empresa
       const { data: empresaData, error: empError } = await supabase
         .from('empresa')
-        .select('admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone')
+        .select('admin_email, admin_senha_hash, admin_configured, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone')
         .limit(1)
         .maybeSingle();
 
-      if (!empError && empresaData && empresaData.admin_senha_hash) {
+      if (!empError && empresaData) {
+        const isConfigured = Boolean(empresaData.admin_configured && empresaData.admin_senha_hash);
         return res.status(200).json({
-          admin_email: empresaData.admin_email || 'admin@tamaraproducoes.com.br',
-          admin_senha_hash: empresaData.admin_senha_hash,
+          isConfigured,
+          admin_email: empresaData.admin_email || '',
+          admin_senha_hash: empresaData.admin_senha_hash || '',
           two_factor_enabled: empresaData.two_factor_enabled || false,
           two_factor_channel: empresaData.two_factor_channel || 'email',
           admin_nome: empresaData.admin_nome || 'Tamara Produções (Administrador)',
@@ -62,8 +64,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Se o banco de dados não estiver configurado ou em fallback
   return res.status(200).json({
-    admin_email: 'admin@tamaraproducoes.com.br',
-    admin_senha_hash: 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+    isConfigured: false,
+    admin_email: '',
+    admin_senha_hash: '',
     two_factor_enabled: false,
     two_factor_channel: 'email',
     admin_nome: 'Tamara Produções (Administrador)',
