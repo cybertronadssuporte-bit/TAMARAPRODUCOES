@@ -98,6 +98,9 @@ export const App: React.FC = () => {
 
     checkAccessAndSyncRoute();
 
+    // Sincronizar dados da empresa e credenciais da nuvem
+    authService.syncAdminProfileFromCloud().catch(() => {});
+
     // Sincronizar título e dados da empresa
     const updateTitle = () => {
       const cfg = storageService.getEmpresaConfig();

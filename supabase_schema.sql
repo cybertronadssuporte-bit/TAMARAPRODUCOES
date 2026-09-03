@@ -101,14 +101,20 @@ CREATE TABLE IF NOT EXISTS public.empresa (
     whatsapp VARCHAR(20) NOT NULL DEFAULT '5585998672404',
     whatsapp_formatado VARCHAR(30) NOT NULL DEFAULT '+55 85 99867-2404',
     email VARCHAR(255) NOT NULL DEFAULT 'contato@tamaraproducoes.com.br',
+    admin_email VARCHAR(255) NOT NULL DEFAULT 'admin@tamaraproducoes.com.br',
+    admin_senha_hash TEXT NOT NULL DEFAULT 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+    two_factor_enabled BOOLEAN NOT NULL DEFAULT false,
+    two_factor_channel VARCHAR(20) NOT NULL DEFAULT 'email',
+    admin_nome VARCHAR(255) NOT NULL DEFAULT 'Tamara Produções (Administrador)',
+    admin_telefone VARCHAR(30) NOT NULL DEFAULT '(85) 99867-2404',
     slogan TEXT DEFAULT 'Transforme seu evento em um momento inesquecível',
     cidade_padrao VARCHAR(100) DEFAULT 'Fortaleza - CE',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- Inserir empresa padrão se não existir
-INSERT INTO public.empresa (nome, whatsapp, whatsapp_formatado, email, cidade_padrao)
-VALUES ('TAMARA PRODUÇÕES', '5585998672404', '+55 85 99867-2404', 'contato@tamaraproducoes.com.br', 'Fortaleza - CE')
+INSERT INTO public.empresa (nome, whatsapp, whatsapp_formatado, email, admin_email, admin_senha_hash, cidade_padrao)
+VALUES ('TAMARA PRODUÇÕES', '5585998672404', '+55 85 99867-2404', 'contato@tamaraproducoes.com.br', 'admin@tamaraproducoes.com.br', 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18', 'Fortaleza - CE')
 ON CONFLICT DO NOTHING;
 
 -- ----------------------------------------------------------------------------

@@ -259,6 +259,76 @@ export const authService = {
     return this.initAdminProfile();
   },
 
+  /**
+   * Sincroniza o perfil e hash administrativo com a nuvem (Supabase)
+   * Garante que celulares e computadores compartilhem exatamente as mesmas credenciais
+   */
+  async syncAdminProfileFromCloud(): Promise<AdminUser> {
+    const local = this.getAdminProfile();
+    if (!isSupabaseConnected || !supabase) {
+      return local;
+    }
+
+    try {
+      const queryPromise = supabase
+        .from('empresa')
+        .select('admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone')
+        .limit(1)
+        .maybeSingle();
+
+      const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error('timeout') }), 2500)
+      );
+
+      const res = await Promise.race([queryPromise, timeoutPromise]);
+      const { data, error } = res as any;
+
+      if (!error && data && data.admin_senha_hash) {
+        const merged: AdminUser = {
+          ...local,
+          email: data.admin_email || local.email,
+          senhaHash: data.admin_senha_hash || local.senhaHash,
+          twoFactorEnabled: data.two_factor_enabled ?? local.twoFactorEnabled,
+          twoFactorChannel: data.two_factor_channel || local.twoFactorChannel,
+          nome: data.admin_nome || local.nome,
+          telefone: data.admin_telefone || local.telefone,
+          role: 'admin',
+          senhaAlteradaPeloUsuario: data.admin_senha_hash !== INITIAL_ADMIN_HASH,
+        } as any;
+
+        safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(merged));
+        return merged;
+      }
+    } catch {
+      // Em caso de falha de rede temporária, mantém o cache local seguro
+    }
+
+    return local;
+  },
+
+  /**
+   * Persiste as alterações de credenciais na nuvem (Supabase) para refletir em todos os dispositivos
+   */
+  async saveAdminProfileToCloud(profile: Partial<AdminUser>): Promise<void> {
+    if (!isSupabaseConnected || !supabase) return;
+    try {
+      await supabase
+        .from('empresa')
+        .update({
+          ...(profile.email ? { admin_email: cleanMobileEmail(profile.email) } : {}),
+          ...(profile.nome ? { admin_nome: cleanMobileInput(profile.nome) } : {}),
+          ...(profile.telefone ? { admin_telefone: cleanMobileInput(profile.telefone) } : {}),
+          ...(profile.twoFactorEnabled !== undefined ? { two_factor_enabled: profile.twoFactorEnabled } : {}),
+          ...(profile.twoFactorChannel ? { two_factor_channel: profile.twoFactorChannel } : {}),
+          ...(profile.senhaHash ? { admin_senha_hash: profile.senhaHash } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .neq('id', '00000000-0000-0000-0000-000000000000');
+    } catch {
+      // Ignore
+    }
+  },
+
   saveAdminProfile(data: Partial<AdminUser>): AdminUser {
     const current = this.getAdminProfile();
     const updated: AdminUser = {
@@ -267,6 +337,7 @@ export const authService = {
       role: 'admin', // Impede qualquer alteração de role
     };
     safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(updated));
+    this.saveAdminProfileToCloud(updated).catch(() => {});
     return updated;
   },
 
@@ -380,6 +451,14 @@ export const authService = {
     const cleanSenha = cleanMobileInput(senhaDigitada);
     const trimSenha = (senhaDigitada || '').trim();
 
+    // Sincroniza com a nuvem antes de validar para garantir que senhas alteradas no computador reflitam no celular
+    let admin = this.getAdminProfile();
+    try {
+      admin = await this.syncAdminProfileFromCloud();
+    } catch {
+      // Mantém perfil local seguro
+    }
+
     // 1. Se o Supabase estiver conectado, tentar autenticar via Supabase Auth
     if (isSupabaseConnected && supabase) {
       try {
@@ -397,7 +476,6 @@ export const authService = {
             .single();
 
           if (profileData && profileData.role === 'admin') {
-            const admin = this.getAdminProfile();
             if (admin.twoFactorEnabled) {
               this.generate2FACode();
               return { success: true, requires2FA: true };
@@ -423,8 +501,6 @@ export const authService = {
     }
 
     // 2. Autenticação Local / Segura (Fallback Sincronizado e Resiliente)
-    const admin = this.getAdminProfile();
-    
     // Calcula os hashes das representações sanitizadas e diretas para eliminar divergências de teclado
     const hashClean = await sha256(cleanSenha);
     const hashTrim = await sha256(trimSenha);
