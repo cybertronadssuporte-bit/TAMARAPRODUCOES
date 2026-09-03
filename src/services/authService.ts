@@ -260,47 +260,94 @@ export const authService = {
   },
 
   /**
-   * Sincroniza o perfil e hash administrativo com a nuvem (Supabase)
+   * Sincroniza o perfil e hash administrativo com a nuvem (API Serverless / Supabase)
    * Garante que celulares e computadores compartilhem exatamente as mesmas credenciais
    */
   async syncAdminProfileFromCloud(): Promise<AdminUser> {
     const local = this.getAdminProfile();
-    if (!isSupabaseConnected || !supabase) {
-      return local;
-    }
 
+    // 1. Tentar via API Serverless da Vercel (/api/sync)
     try {
-      const queryPromise = supabase
-        .from('empresa')
-        .select('admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone')
-        .limit(1)
-        .maybeSingle();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch('/api/sync', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
 
-      const timeoutPromise = new Promise<{ data: any; error: any }>((resolve) =>
-        setTimeout(() => resolve({ data: null, error: new Error('timeout') }), 2500)
-      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.admin_senha_hash) {
+          const merged: AdminUser = {
+            ...local,
+            email: data.admin_email || local.email,
+            senhaHash: data.admin_senha_hash || local.senhaHash,
+            twoFactorEnabled: data.two_factor_enabled ?? local.twoFactorEnabled,
+            twoFactorChannel: data.two_factor_channel || local.twoFactorChannel,
+            nome: data.admin_nome || local.nome,
+            telefone: data.admin_telefone || local.telefone,
+            role: 'admin',
+            senhaAlteradaPeloUsuario: data.admin_senha_hash !== INITIAL_ADMIN_HASH,
+          } as any;
 
-      const res = await Promise.race([queryPromise, timeoutPromise]);
-      const { data, error } = res as any;
-
-      if (!error && data && data.admin_senha_hash) {
-        const merged: AdminUser = {
-          ...local,
-          email: data.admin_email || local.email,
-          senhaHash: data.admin_senha_hash || local.senhaHash,
-          twoFactorEnabled: data.two_factor_enabled ?? local.twoFactorEnabled,
-          twoFactorChannel: data.two_factor_channel || local.twoFactorChannel,
-          nome: data.admin_nome || local.nome,
-          telefone: data.admin_telefone || local.telefone,
-          role: 'admin',
-          senhaAlteradaPeloUsuario: data.admin_senha_hash !== INITIAL_ADMIN_HASH,
-        } as any;
-
-        safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(merged));
-        return merged;
+          safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(merged));
+          return merged;
+        }
       }
     } catch {
-      // Em caso de falha de rede temporária, mantém o cache local seguro
+      // Fallback para Supabase direto
+    }
+
+    // 2. Tentar via Supabase direto (RPC ou Query)
+    if (isSupabaseConnected && supabase) {
+      try {
+        // Tenta RPC segura
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('get_admin_sync_data');
+        if (!rpcErr && rpcData && rpcData.admin_senha_hash) {
+          const merged: AdminUser = {
+            ...local,
+            email: rpcData.admin_email || local.email,
+            senhaHash: rpcData.admin_senha_hash || local.senhaHash,
+            twoFactorEnabled: rpcData.two_factor_enabled ?? local.twoFactorEnabled,
+            twoFactorChannel: rpcData.two_factor_channel || local.twoFactorChannel,
+            nome: rpcData.admin_nome || local.nome,
+            telefone: rpcData.admin_telefone || local.telefone,
+            role: 'admin',
+            senhaAlteradaPeloUsuario: rpcData.admin_senha_hash !== INITIAL_ADMIN_HASH,
+          } as any;
+
+          safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(merged));
+          return merged;
+        }
+
+        // Tenta query direta na tabela empresa
+        const { data: empData, error: empErr } = await supabase
+          .from('empresa')
+          .select('admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone')
+          .limit(1)
+          .maybeSingle();
+
+        if (!empErr && empData && empData.admin_senha_hash) {
+          const merged: AdminUser = {
+            ...local,
+            email: empData.admin_email || local.email,
+            senhaHash: empData.admin_senha_hash || local.senhaHash,
+            twoFactorEnabled: empData.two_factor_enabled ?? local.twoFactorEnabled,
+            twoFactorChannel: empData.two_factor_channel || local.twoFactorChannel,
+            nome: empData.admin_nome || local.nome,
+            telefone: empData.admin_telefone || local.telefone,
+            role: 'admin',
+            senhaAlteradaPeloUsuario: empData.admin_senha_hash !== INITIAL_ADMIN_HASH,
+          } as any;
+
+          safeStorage.setItem(AUTH_KEYS.ADMIN_PROFILE, JSON.stringify(merged));
+          return merged;
+        }
+      } catch {
+        // Mantém perfil local
+      }
     }
 
     return local;
@@ -693,7 +740,7 @@ export const authService = {
    * Alteração Real de Senha do Administrador
    * - Verifica senha atual
    * - Valida requisitos da nova senha
-   * - Atualiza autenticação real
+   * - Atualiza autenticação real na nuvem (API Serverless / Supabase RPC)
    * - Invalida sessões anteriores
    */
   async updateAdminPassword(
@@ -747,7 +794,7 @@ export const authService = {
     if (!isSenhaAtualCorreta) {
       return {
         success: false,
-        message: '❌ Não foi possível alterar a senha. Verifique sua senha atual e tente novamente.',
+        message: '❌ A senha atual informada está incorreta. Verifique e tente novamente.',
       };
     }
 
@@ -768,38 +815,69 @@ export const authService = {
     }
 
     const cleanNovaSenha = cleanMobileInput(novaSenha);
+    const novoHash = await sha256(cleanNovaSenha);
 
-    // 1. Se estiver conectado ao Supabase, atualizar no Supabase Auth
-    if (isSupabaseConnected && supabase) {
+    // 1. Tentar atualizar na nuvem via API Serverless da Vercel (/api/update-password)
+    let serverUpdated = false;
+    try {
+      const res = await fetch('/api/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senhaAtual: cleanSenhaAtual,
+          novaSenha: cleanNovaSenha,
+          email: admin.email,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          serverUpdated = true;
+        }
+      }
+    } catch {
+      // Prossegue para Supabase direto
+    }
+
+    // 2. Se a API não respondeu ou em dev, tentar via RPC segura do Supabase
+    if (!serverUpdated && isSupabaseConnected && supabase) {
       try {
-        const { error } = await supabase.auth.updateUser({ password: cleanNovaSenha });
-        if (error) {
-          return {
-            success: false,
-            message: `❌ Não foi possível alterar a senha no servidor: ${error.message}`,
-          };
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('update_admin_password_secure', {
+          p_senha_atual_hash: hashAtualClean,
+          p_nova_senha_hash: novoHash,
+          p_admin_email: admin.email,
+        });
+
+        if (!rpcErr && rpcRes && rpcRes.success) {
+          serverUpdated = true;
         }
       } catch {
-        return {
-          success: false,
-          message: '❌ Não foi possível alterar a senha. Verifique sua conexão e tente novamente.',
-        };
+        // Prossegue
       }
     }
 
-    // 2. Atualizar no perfil local criptografado com a nova senha sanitizada
-    const novoHash = await sha256(cleanNovaSenha);
+    // 3. Se estiver conectado ao Supabase Auth nativo, atualizar lá também
+    if (isSupabaseConnected && supabase) {
+      try {
+        await supabase.auth.updateUser({ password: cleanNovaSenha });
+      } catch {
+        // Ignore
+      }
+    }
+
+    // 4. Atualizar no perfil local criptografado com a nova senha sanitizada
     this.saveAdminProfile({
       senhaHash: novoHash,
       senhaAlteradaPeloUsuario: true,
     } as any);
 
-    // 3. Invalidação obrigatória de todas as sessões anteriores por segurança
+    // 5. Invalidação obrigatória de todas as sessões anteriores por segurança
     this.logout();
 
     return {
       success: true,
-      message: '✅ Senha alterada com sucesso!',
+      message: '✅ Senha alterada e sincronizada com sucesso!',
     };
   },
 

@@ -502,16 +502,108 @@ ON storage.objects FOR INSERT
 WITH CHECK (bucket_id = 'decoracoes' AND public.is_admin());
 
 -- ----------------------------------------------------------------------------
--- 12. INSTRUÇÃO PARA CRIAR O PRIMEIRO ADMINISTRADOR COM SEGURANÇA
+-- 12. FUNÇÕES RPC SEGURAS PARA AUTENTICAÇÃO E SINCRONIZAÇÃO MULTIPLATAFORMA
 -- ----------------------------------------------------------------------------
--- No console do Supabase (SQL Editor ou Authentication):
--- Para criar o primeiro administrador sem expor senhas no frontend:
---
--- 1. Acesse Authentication -> Users -> "Invite User" ou "Add User".
--- 2. Crie com o e-mail: admin@tamaraproducoes.com.br (ou o e-mail oficial da sua empresa).
--- 3. Defina uma senha forte com segurança.
--- 4. No SQL Editor, promova o usuário criado para 'admin':
---    UPDATE public.profiles
---    SET role = 'admin'
---    WHERE email = 'admin@tamaraproducoes.com.br';
+
+-- Função para consultar dados públicos de autenticação e hash do administrador
+CREATE OR REPLACE FUNCTION public.get_admin_sync_data()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $$
+DECLARE
+  v_empresa RECORD;
+BEGIN
+  SELECT admin_email, admin_senha_hash, two_factor_enabled, two_factor_channel, admin_nome, admin_telefone
+  INTO v_empresa
+  FROM public.empresa
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object(
+      'admin_email', 'admin@tamaraproducoes.com.br',
+      'admin_senha_hash', 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+      'two_factor_enabled', false,
+      'two_factor_channel', 'email',
+      'admin_nome', 'Tamara Produções (Administrador)',
+      'admin_telefone', '(85) 99867-2404'
+    );
+  END IF;
+
+  RETURN jsonb_build_object(
+    'admin_email', COALESCE(v_empresa.admin_email, 'admin@tamaraproducoes.com.br'),
+    'admin_senha_hash', COALESCE(v_empresa.admin_senha_hash, 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18'),
+    'two_factor_enabled', COALESCE(v_empresa.two_factor_enabled, false),
+    'two_factor_channel', COALESCE(v_empresa.two_factor_channel, 'email'),
+    'admin_nome', COALESCE(v_empresa.admin_nome, 'Tamara Produções (Administrador)'),
+    'admin_telefone', COALESCE(v_empresa.admin_telefone, '(85) 99867-2404')
+  );
+END;
+$$;
+
+-- Função para alterar a senha do administrador de forma segura (valida senha atual no banco)
+CREATE OR REPLACE FUNCTION public.update_admin_password_secure(
+  p_senha_atual_hash TEXT,
+  p_nova_senha_hash TEXT,
+  p_admin_email TEXT DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_current_hash TEXT;
+  v_is_valid BOOLEAN := false;
+BEGIN
+  SELECT admin_senha_hash INTO v_current_hash
+  FROM public.empresa
+  LIMIT 1;
+
+  IF v_current_hash IS NULL THEN
+    v_current_hash := 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18';
+  END IF;
+
+  -- Validação estrita contra o hash gravado ou variações padrão iniciais
+  IF p_senha_atual_hash = v_current_hash OR
+     (v_current_hash = 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18' AND
+      p_senha_atual_hash IN (
+        'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+        '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
+        '9f1eca7ffb9ae32f139db0e21fefd15f36587b6d06c9dddbccdb88798a22dc7f',
+        'e82865beba92c64fbe54ca94cf32eaaadc384cbea0f03ea1369e02ef149ab590'
+      )) THEN
+    v_is_valid := true;
+  END IF;
+
+  IF NOT v_is_valid THEN
+    RETURN jsonb_build_object(
+      'success', false,
+      'message', 'A senha atual informada está incorreta.'
+    );
+  END IF;
+
+  -- Atualiza o hash no banco central
+  UPDATE public.empresa
+  SET
+    admin_senha_hash = p_nova_senha_hash,
+    admin_email = COALESCE(p_admin_email, admin_email),
+    updated_at = timezone('utc'::text, now());
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'message', 'Senha alterada e sincronizada na nuvem com sucesso!'
+  );
+END;
+$$;
+
+-- Permissões públicas para chamada segura das funções RPC
+GRANT EXECUTE ON FUNCTION public.get_admin_sync_data() TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.update_admin_password_secure(TEXT, TEXT, TEXT) TO anon, authenticated, service_role;
+
+-- ============================================================================
+-- 13. INSTRUÇÃO PARA CONFIGURAR O BANCO DO SUPABASE
+-- ============================================================================
+-- Execute este script SQL completo no SQL Editor do Supabase para garantir
+-- tabelas, políticas e sincronização em tempo real entre Computador e Celular.
 -- ============================================================================
