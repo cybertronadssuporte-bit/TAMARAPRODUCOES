@@ -41,11 +41,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const existing = await getAdminRecord();
 
-    // Se já existir administrador configurado no banco e não for atualização autorizada
-    if (existing && existing.exists && existing.senhaHash && existing.email !== cleanEmailVal) {
+    // Se já existir administrador configurado no banco, bloqueia QUALQUER nova tentativa de setup
+    if (existing && existing.exists && existing.senhaHash) {
       return res.status(400).json({
         success: false,
-        message: 'O administrador do site já foi cadastrado anteriormente.',
+        message: 'O administrador do site já foi cadastrado. Para alterar a senha, use a opção "Minha Conta" dentro do painel após fazer login.',
       });
     }
 

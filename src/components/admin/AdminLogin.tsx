@@ -59,9 +59,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
       .then((status) => {
         if (mounted) {
           setIsSetupMode(!status.exists);
-          if (status.email) {
-            setEmail((prev) => prev || status.email || '');
-          }
+          // Não preenchemos o e-mail automaticamente para não expô-lo a visitantes
           setCheckingStatus(false);
         }
       })
@@ -412,17 +410,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 </button>
               </div>
 
-              {authService.isAdminConfigured() && (
-                <div className="text-center pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsSetupMode(false)}
-                    className="text-[11px] text-gray-400 hover:text-gold-400"
-                  >
-                    Já possui administrador configurado? <strong>Fazer Login</strong>
-                  </button>
-                </div>
-              )}
+
             </form>
           ) : !step2FA ? (
             /* FLUXO 2: LOGIN NORMAL */
@@ -497,15 +485,8 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 </button>
               </div>
 
-              <div className="text-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSetupMode(true)}
-                  className="text-[11px] text-gray-400 hover:text-gold-400"
-                >
-                  Precisa reconfigurar ou cadastrar novo acesso? <strong>Clique aqui</strong>
-                </button>
-              </div>
+              {/* Botão de reconfiguração removido por segurança — */}
+              {/* Para redefinir acesso, o admin deve usar o painel interno (Minha Conta) */}
             </form>
           ) : (
             /* FLUXO 3: CONFIRMAÇÃO 2FA */

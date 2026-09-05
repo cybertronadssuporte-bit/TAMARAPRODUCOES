@@ -24,7 +24,7 @@ const DEFAULT_GLOBAL_ADMIN: AdminRecord = {
   exists: true,
   nome: 'Tamara Produções (Administrador)',
   email: 'maramaragomes00@gmail.com',
-  senhaHash: 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+  senhaHash: 'e1659dde6d1bb21567e3cb15f90e992f4e9372fd696c821f263de1ed32ea3ef2', // SHA-256 de Tamara@2026!
   telefone: '(85) 99867-2404',
   twoFactorEnabled: false,
   twoFactorChannel: 'email',
