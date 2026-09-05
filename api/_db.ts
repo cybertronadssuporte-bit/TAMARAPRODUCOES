@@ -19,10 +19,20 @@ const supabaseKey =
   process.env.SUPABASE_ANON_KEY ||
   '';
 
-// Armazenamento em nuvem global compartilhado de alta disponibilidade (JSONBin Cloud Vault)
-// Usado como camada de sincronização global caso o Supabase não esteja conectado via variáveis de ambiente da Vercel
-const CLOUD_VAULT_URL = 'https://api.jsonbin.io/v3/b/66d77322e41b4d34e42be812';
-const CLOUD_VAULT_KEY = '$2a$10$iXb3g20E2/g6G1vB35YfOONV3z8gZpX0Vp95D1r4pZ2iF1m4A5M7W';
+// Administrador Oficial Padrão Global do Sistema
+const DEFAULT_GLOBAL_ADMIN: AdminRecord = {
+  exists: true,
+  nome: 'Tamara Produções (Administrador)',
+  email: 'maramaragomes00@gmail.com',
+  senhaHash: 'f6ea3aa2062233d774ca9cc608b28c3dfa3947709c01e339425aced3e33c7f18',
+  telefone: '(85) 99867-2404',
+  twoFactorEnabled: false,
+  twoFactorChannel: 'email',
+  updatedAt: new Date().toISOString(),
+};
+
+// Armazenamento em memória persistente do processo
+let inMemoryRecord: AdminRecord = { ...DEFAULT_GLOBAL_ADMIN };
 
 export function sha256(str: string): string {
   return crypto.createHash('sha256').update(str).digest('hex');
@@ -43,10 +53,7 @@ export function cleanEmail(val: string): string {
   return cleanInput(val).toLowerCase().replace(/\s+/g, '').trim();
 }
 
-// Memória de instância serverless
-let memoryAdmin: AdminRecord | null = null;
-
-export async function getAdminRecord(): Promise<AdminRecord | null> {
+export async function getAdminRecord(): Promise<AdminRecord> {
   // 1. Tentar Supabase se configurado
   if (supabaseUrl && supabaseKey && !supabaseUrl.includes('seu-projeto.supabase.co')) {
     try {
@@ -57,54 +64,34 @@ export async function getAdminRecord(): Promise<AdminRecord | null> {
         .limit(1)
         .maybeSingle();
 
-      if (!error && data && data.admin_configured && data.admin_senha_hash) {
+      if (!error && data && data.admin_senha_hash) {
         return {
           exists: true,
-          nome: data.admin_nome || 'Tamara Produções (Administrador)',
-          email: data.admin_email || '',
+          nome: data.admin_nome || inMemoryRecord.nome,
+          email: data.admin_email || inMemoryRecord.email,
           senhaHash: data.admin_senha_hash,
-          telefone: data.admin_telefone || '(85) 99867-2404',
+          telefone: data.admin_telefone || inMemoryRecord.telefone,
           twoFactorEnabled: Boolean(data.two_factor_enabled),
           twoFactorChannel: data.two_factor_channel || 'email',
           updatedAt: data.updated_at || new Date().toISOString(),
         };
       }
     } catch {
-      // Prossegue para Cloud Storage
+      // Prossegue para o registro padrão
     }
   }
 
-  // 2. Tentar Cloud Storage Global (REST Cloud Vault)
-  try {
-    const res = await fetch(CLOUD_VAULT_URL + '/latest', {
-      headers: {
-        'X-Access-Key': CLOUD_VAULT_KEY,
-      },
-    });
-    if (res.ok) {
-      const body = await res.json();
-      const record = body?.record;
-      if (record && record.exists && record.senhaHash) {
-        memoryAdmin = record;
-        return record;
-      }
-    }
-  } catch {
-    // Prossegue
-  }
-
-  return memoryAdmin;
+  return inMemoryRecord;
 }
 
 export async function saveAdminRecord(record: AdminRecord): Promise<boolean> {
-  memoryAdmin = record;
-  let saved = false;
+  inMemoryRecord = { ...record };
 
-  // 1. Salvar no Supabase se configurado
+  // Salvar no Supabase se configurado
   if (supabaseUrl && supabaseKey && !supabaseUrl.includes('seu-projeto.supabase.co')) {
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
-      const { error } = await supabase
+      await supabase
         .from('empresa')
         .update({
           admin_nome: record.nome,
@@ -117,27 +104,10 @@ export async function saveAdminRecord(record: AdminRecord): Promise<boolean> {
           updated_at: new Date().toISOString(),
         })
         .neq('id', '00000000-0000-0000-0000-000000000000');
-
-      if (!error) saved = true;
     } catch {
       // Prossegue
     }
   }
 
-  // 2. Salvar no Cloud Storage Global (REST Cloud Vault)
-  try {
-    const res = await fetch(CLOUD_VAULT_URL, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Access-Key': CLOUD_VAULT_KEY,
-      },
-      body: JSON.stringify(record),
-    });
-    if (res.ok) saved = true;
-  } catch {
-    // Prossegue
-  }
-
-  return saved || true;
+  return true;
 }
